@@ -1,12 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
 import vertexShaderSource from './shaders/curved_mirror_vertex.glsl?raw';
-import fragmentShaderSource from './shaders/analytical_mirror_fragment.glsl?raw';
+import fragmentShaderSource from './shaders/square_mirror_fragment_asym.glsl?raw';
+import MirrorVisualization from './MirrorVisualization';
 
 export default function SimpleWebcam() {
   const videoRef = useRef(null);
   const glCanvasRef = useRef(null);
   const rayTracedCanvasRef = useRef(null);
-  const diagramCanvasRef = useRef(null);
   const [isActive, setIsActive] = useState(false);
   const glRef = useRef(null);
   const rayTracedGlRef = useRef(null);
@@ -15,11 +15,19 @@ export default function SimpleWebcam() {
   const shaderProgramRef = useRef(null);
 
   // Mirror parameters (state)
-  const [profileA2, setProfileA2] = useState(0.0);    // r⁴ coefficient
-  const [profileA1, setProfileA1] = useState(-0.3);   // r² coefficient  
-  const [profileA0, setProfileA0] = useState(0.0);    // constant offset
+  // Quadratic Bézier control points in y-space (full cross-section)
+  // P₀ = (yMin, z₀) - bottom edge at y=-mirrorHalfHeight
+  // P₁ = (y₁, z₁) - middle control point
+  // P₂ = (yMax, z₂) - top edge at y=+mirrorHalfHeight
+  const [controlZ0, setControlZ0] = useState(0.0);      // z-depth at bottom
+  const [controlZ1, setControlZ1] = useState(-0.3);     // z-depth of middle control point
+  const [controlZ2, setControlZ2] = useState(0.0);      // z-depth at top
+  const [controlY1Ratio, setControlY1Ratio] = useState(0.0); // y₁ position as ratio (-1 to 1, where 0 = center)
+  
   const [mirrorDist, setMirrorDist] = useState(2.0);  // distance from camera
-  const [mirrorRadius, setMirrorRadius] = useState(1.5); // mirror radius
+  const [mirrorRadius, setMirrorRadius] = useState(1.5); // mirror radius (used for display)
+  const [mirrorHalfWidth, setMirrorHalfWidth] = useState(2.0); // rectangular mirror half-width
+  const [mirrorHalfHeight, setMirrorHalfHeight] = useState(1.5); // rectangular mirror half-height
   const [imagePlaneDist, setImagePlaneDist] = useState(0.5); // image plane distance
   const [imageSizeX, setImageSizeX] = useState(1.6);  // image size X
   const [imageSizeY, setImageSizeY] = useState(1.2);  // image size Y
@@ -146,6 +154,7 @@ export default function SimpleWebcam() {
     
     if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
       console.error('Fragment shader compilation error:', gl.getShaderInfoLog(fragmentShader));
+      console.error('Fragment shader source length:', fragmentShaderSource.length);
       return;
     }
 
@@ -177,237 +186,6 @@ export default function SimpleWebcam() {
 
     console.log('WebGL initialized for ray-traced feed');
   }, []);
-
-  // Draw cross-section diagram
-  useEffect(() => {
-    const canvas = diagramCanvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    const width = canvas.width;
-    const height = canvas.height;
-    
-    // Clear canvas
-    ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(0, 0, width, height);
-    
-    // Set up coordinate system
-    // Camera is at origin, looking +Z (right on diagram)
-    // We'll draw a side view: horizontal = Z axis, vertical = Y/R axis
-    const scale = 60; // pixels per unit
-    const originX = 150; // camera position
-    const originY = height / 2;
-    
-    // Helper function to convert world coords to canvas coords
-    const toCanvasX = (z) => originX + z * scale;
-    const toCanvasY = (r) => originY - r * scale; // flip Y
-    
-    // Draw axes
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    
-    // Z axis (horizontal)
-    ctx.beginPath();
-    ctx.moveTo(0, originY);
-    ctx.lineTo(width, originY);
-    ctx.stroke();
-    
-    // R axis (vertical)
-    ctx.beginPath();
-    ctx.moveTo(originX, 0);
-    ctx.lineTo(originX, height);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    
-    // Draw camera at origin
-    ctx.fillStyle = '#00ff00';
-    ctx.beginPath();
-    ctx.arc(toCanvasX(0), toCanvasY(0), 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#00ff00';
-    ctx.font = '12px monospace';
-    ctx.fillText('Camera', toCanvasX(0) - 30, toCanvasY(0) - 15);
-    
-    // Draw image plane (behind camera)
-    const imgPlaneZ = -imagePlaneDist;
-    const imgPlaneHalfHeight = imageSizeY / 2;
-    
-    ctx.strokeStyle = '#ff00ff';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(toCanvasX(imgPlaneZ), toCanvasY(-imgPlaneHalfHeight));
-    ctx.lineTo(toCanvasX(imgPlaneZ), toCanvasY(imgPlaneHalfHeight));
-    ctx.stroke();
-    
-    ctx.fillStyle = '#ff00ff';
-    ctx.fillText('Image Plane', toCanvasX(imgPlaneZ) - 45, toCanvasY(imgPlaneHalfHeight) + 20);
-    
-    // Draw mirror curve
-    // Profile: z(r) = a2*r^4 + a1*r^2 + a0 + mirrorDist
-    ctx.strokeStyle = '#00aaff';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    
-    const numPoints = 100;
-    let firstPoint = true;
-    
-    for (let i = 0; i <= numPoints; i++) {
-      const t = i / numPoints;
-      const r = -mirrorRadius + t * (2 * mirrorRadius);
-      const r2 = r * r;
-      const r4 = r2 * r2;
-      const z = profileA2 * r4 + profileA1 * r2 + profileA0 + mirrorDist;
-      
-      const canvasX = toCanvasX(z);
-      const canvasY = toCanvasY(r);
-      
-      if (firstPoint) {
-        ctx.moveTo(canvasX, canvasY);
-        firstPoint = false;
-      } else {
-        ctx.lineTo(canvasX, canvasY);
-      }
-    }
-    ctx.stroke();
-    
-    // Draw mirror endpoints
-    const r = mirrorRadius;
-    const r2 = r * r;
-    const r4 = r2 * r2;
-    const zEdge = profileA2 * r4 + profileA1 * r2 + profileA0 + mirrorDist;
-    
-    ctx.fillStyle = '#00aaff';
-    ctx.beginPath();
-    ctx.arc(toCanvasX(zEdge), toCanvasY(r), 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(toCanvasX(zEdge), toCanvasY(-r), 5, 0, Math.PI * 2);
-    ctx.fill();
-    
-    // Label mirror
-    const zCenter = profileA0 + mirrorDist;
-    ctx.fillStyle = '#00aaff';
-    ctx.fillText('Mirror', toCanvasX(zCenter) - 20, toCanvasY(mirrorRadius) + 20);
-    
-    // Helper function to calculate surface normal at a point
-    const surfaceNormal = (r) => {
-      const r2 = r * r;
-      const dCoeff = 4.0 * profileA2 * r2 + 2.0 * profileA1;
-      
-      // For 2D cross-section: normal in (z, r) plane
-      // dz/dr = r * dCoeff
-      const dzdr = r * dCoeff;
-      
-      // Normal is perpendicular to tangent
-      // Tangent direction: (1, dzdr) in (z, r) coords
-      // Normal direction: (-dzdr, 1) pointing toward camera
-      const nz = -dzdr;
-      const nr = 1.0;
-      const len = Math.sqrt(nz * nz + nr * nr);
-      
-      return { nz: nz / len, nr: nr / len };
-    };
-    
-    // Helper function to reflect a ray direction around a normal
-    const reflect = (incidentZ, incidentR, normalZ, normalR) => {
-      // R = I - 2(N·I)N
-      const dot = incidentZ * normalZ + incidentR * normalR;
-      return {
-        z: incidentZ - 2.0 * dot * normalZ,
-        r: incidentR - 2.0 * dot * normalR
-      };
-    };
-    
-    // Draw multiple sample rays
-    const numRays = 7;
-    ctx.strokeStyle = '#ffff00';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([2, 2]);
-    
-    for (let i = 0; i < numRays; i++) {
-      // Distribute rays across the field of view
-      const rayR = (i / (numRays - 1) - 0.5) * mirrorRadius * 1.6;
-      
-      // Ray from camera (0, 0) toward mirror
-      // Direction to hit approximately at r=rayR on mirror base plane
-      const approxZ = mirrorDist;
-      const rayDirZ = approxZ;
-      const rayDirR = rayR;
-      const rayLen = Math.sqrt(rayDirZ * rayDirZ + rayDirR * rayDirR);
-      const rayDirNormZ = rayDirZ / rayLen;
-      const rayDirNormR = rayDirR / rayLen;
-      
-      // Find actual intersection with mirror surface
-      // For simplicity, iterate to find intersection point
-      let hitR = rayR;
-      for (let iter = 0; iter < 5; iter++) {
-        const hitR2 = hitR * hitR;
-        const hitR4 = hitR2 * hitR2;
-        const hitZ = profileA2 * hitR4 + profileA1 * hitR2 + profileA0 + mirrorDist;
-        
-        // Ray: (0,0) + t * (rayDirNormZ, rayDirNormR)
-        // We want: t * rayDirNormR = hitR and t * rayDirNormZ = hitZ
-        const t = hitZ / rayDirNormZ;
-        const computedR = t * rayDirNormR;
-        
-        // Update hitR for next iteration
-        hitR = computedR;
-      }
-      
-      const hitR2 = hitR * hitR;
-      const hitR4 = hitR2 * hitR2;
-      const hitZ = profileA2 * hitR4 + profileA1 * hitR2 + profileA0 + mirrorDist;
-      
-      // Check if ray hits within mirror bounds
-      if (Math.abs(hitR) > mirrorRadius) continue;
-      
-      // Draw incident ray
-      ctx.beginPath();
-      ctx.moveTo(toCanvasX(0), toCanvasY(0));
-      ctx.lineTo(toCanvasX(hitZ), toCanvasY(hitR));
-      ctx.stroke();
-      
-      // Calculate surface normal at hit point
-      const normal = surfaceNormal(hitR);
-      
-      // Ensure normal points toward camera (negative Z)
-      let nz = normal.nz;
-      let nr = normal.nr;
-      if (nz > 0) {
-        nz = -nz;
-        nr = -nr;
-      }
-      
-      // Calculate reflected ray direction
-      const reflected = reflect(rayDirNormZ, rayDirNormR, nz, nr);
-      
-      // Trace reflected ray to image plane
-      // Image plane is at z = -imagePlaneDist
-      // Ray: (hitZ, hitR) + t * (reflected.z, reflected.r)
-      // Solve: hitZ + t * reflected.z = -imagePlaneDist
-      if (reflected.z < 0) { // Ray heading back toward camera
-        const t = (-imagePlaneDist - hitZ) / reflected.z;
-        const imgHitZ = -imagePlaneDist;
-        const imgHitR = hitR + t * reflected.r;
-        
-        // Draw reflected ray
-        ctx.beginPath();
-        ctx.moveTo(toCanvasX(hitZ), toCanvasY(hitR));
-        ctx.lineTo(toCanvasX(imgHitZ), toCanvasY(imgHitR));
-        ctx.stroke();
-      }
-    }
-    
-    ctx.setLineDash([]);
-    
-    // Add legend/scale
-    ctx.fillStyle = '#aaa';
-    ctx.font = '11px monospace';
-    ctx.fillText(`Scale: ${scale}px = 1 unit`, 10, height - 10);
-    
-  }, [profileA2, profileA1, profileA0, mirrorDist, mirrorRadius, imagePlaneDist, imageSizeX, imageSizeY]);
-
 
   const startCamera = async () => {
     try {
@@ -445,6 +223,46 @@ export default function SimpleWebcam() {
     const rayTracedCanvas = rayTracedCanvasRef.current;
     
     if (!gl || !texture || !video || !rayTracedGl || !rayTracedCanvas) return;
+
+    // Convert Bézier control points to polynomial coefficients
+    const createSegmentsFromControlPoints = () => {
+      // For a single quadratic Bézier segment from yMin to yMax
+      const yMin = -mirrorHalfHeight;
+      const yMax = mirrorHalfHeight;
+      const yRange = yMax - yMin;
+      
+      // Control points in y-space:
+      // P₀ = (yMin, z₀) - bottom edge
+      // P₁ = (center, z₁) - middle control point (at y=0 for center)
+      // P₂ = (yMax, z₂) - top edge
+      
+      // Quadratic Bézier parametric form: B(t) = (1-t)²·P₀ + 2(1-t)t·P₁ + t²·P₂, t ∈ [0,1]
+      // where t = (y - yMin) / yRange
+      
+      // Bézier coefficients in t-space:
+      // z(t) = a_t·t² + b_t·t + c_t
+      const z0 = controlZ0;
+      const z1 = controlZ1;
+      const z2 = controlZ2;
+      
+      const a_t = z0 - 2.0 * z1 + z2;
+      const b_t = 2.0 * (z1 - z0);
+      const c_t = z0;
+      
+      // Convert to polynomial in y-space: z(y) = a·y² + b·y + c
+      // by substituting t = (y - yMin) / yRange and expanding
+      if (yRange === 0.0) {
+        return [{ a: 0, b: 0, c: z0, yMin }];
+      }
+      
+      const a = a_t / (yRange * yRange);
+      const b = b_t / yRange - 2.0 * a_t * yMin / (yRange * yRange);
+      const c = c_t + a_t * yMin * yMin / (yRange * yRange) - b_t * yMin / yRange;
+      
+      return [
+        { a, b, c, yMin }
+      ];
+    };
 
     let frameCount = 0;
     let lastTime = performance.now();
@@ -511,15 +329,39 @@ export default function SimpleWebcam() {
         rayTracedGl.vertexAttribPointer(aPosition, 2, rayTracedGl.FLOAT, false, 0, 0);
         
         // Set uniforms
-        rayTracedGl.uniform2f(rayTracedGl.getUniformLocation(program, 'u_resolution'), 
-          rayTracedCanvas.width, rayTracedCanvas.height);
+        const resolutionLoc = rayTracedGl.getUniformLocation(program, 'u_resolution');
+        if (resolutionLoc) {
+          rayTracedGl.uniform2f(resolutionLoc, rayTracedCanvas.width, rayTracedCanvas.height);
+        }
         
-        // Mirror parameters from state
-        rayTracedGl.uniform3f(rayTracedGl.getUniformLocation(program, 'u_profileCoeffs'), 
-          profileA2, profileA1, profileA0);
+        // Set up bezier curve segments from control points
+        const segments = createSegmentsFromControlPoints();
+        const segmentData = new Float32Array(16 * 4); // MAX_SEGMENTS = 16, vec4 per segment
+        for (let i = 0; i < segments.length; i++) {
+          segmentData[i * 4 + 0] = segments[i].a;
+          segmentData[i * 4 + 1] = segments[i].b;
+          segmentData[i * 4 + 2] = segments[i].c;
+          segmentData[i * 4 + 3] = segments[i].yMin;
+        }
         
+        // Upload segments as uniform array
+        // Note: segment.w is now yMin instead of sMin
+        for (let i = 0; i < 16; i++) {
+          const loc = rayTracedGl.getUniformLocation(program, `u_segments[${i}]`);
+          if (loc !== null) {
+            rayTracedGl.uniform4f(loc, 
+              segmentData[i * 4 + 0],  // a
+              segmentData[i * 4 + 1],  // b
+              segmentData[i * 4 + 2],  // c
+              segmentData[i * 4 + 3]   // yMin
+            );
+          }
+        }
+        
+        rayTracedGl.uniform1i(rayTracedGl.getUniformLocation(program, 'u_numSegments'), segments.length);
         rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_mirrorDist'), mirrorDist);
-        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_mirrorRadius'), mirrorRadius);
+        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_mirrorHalfWidth'), mirrorHalfWidth);
+        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_mirrorHalfHeight'), mirrorHalfHeight);
         rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_imagePlaneDist'), imagePlaneDist);
         rayTracedGl.uniform2f(rayTracedGl.getUniformLocation(program, 'u_imageSize'), imageSizeX, imageSizeY);
         rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_fov'), fov);
@@ -554,11 +396,11 @@ export default function SimpleWebcam() {
         cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [isActive, profileA2, profileA1, profileA0, mirrorDist, mirrorRadius, imagePlaneDist, imageSizeX, imageSizeY, fov]);
+  }, [isActive, controlZ0, controlZ1, controlZ2, controlY1Ratio, mirrorDist, mirrorRadius, mirrorHalfWidth, mirrorHalfHeight, imagePlaneDist, imageSizeX, imageSizeY, fov]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px' }}>
-      <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <h3>Original Feed</h3>
           <video 
@@ -588,167 +430,138 @@ export default function SimpleWebcam() {
         </div>
       </div>
       
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-        <h3>Scene Cross-Section (Side View)</h3>
-        <canvas 
-          ref={diagramCanvasRef} 
-          width="800" 
-          height="400"
-          style={{ border: '2px solid #555', borderRadius: '8px', backgroundColor: '#1a1a1a' }}
-        />
-        <div style={{ fontSize: '12px', color: '#aaa', textAlign: 'center' }}>
-          <span style={{ color: '#00ff00' }}>● Camera</span> | 
-          <span style={{ color: '#ff00ff' }}> ─ Image Plane</span> | 
-          <span style={{ color: '#00aaff' }}> ─ Mirror</span> | 
-          <span style={{ color: '#ffff00' }}> ┄ Sample Ray</span>
-        </div>
-      </div>
+      <MirrorVisualization
+        controlZ0={controlZ0}
+        controlZ1={controlZ1}
+        controlZ2={controlZ2}
+        controlY1Ratio={controlY1Ratio}
+        mirrorDist={mirrorDist}
+        mirrorHalfHeight={mirrorHalfHeight}
+        imagePlaneDist={imagePlaneDist}
+        imageSizeY={imageSizeY}
+        videoRef={videoRef}
+      />
       
       <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
         <button onClick={startCamera} disabled={isActive}>Start</button>
         <button onClick={stopCamera} disabled={!isActive}>Stop</button>
       </div>
-      
-      <div style={{ maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
-        <h3>Mirror Parameters</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+
+      <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+        <h3>Mirror Curve Controls</h3>
+        <p style={{ color: '#666', marginBottom: '20px' }}>
+          Adjust the distance from camera (Z-axis) for each control point of the curved mirror
+        </p>
+        
+        <div style={{ 
+          backgroundColor: '#f5f5f5', 
+          padding: '20px', 
+          borderRadius: '8px',
+          marginBottom: '20px'
+        }}>
+          <h4 style={{ marginTop: 0 }}>Control Point Distances from Camera</h4>
           
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Profile a₂ (r⁴): {profileA2.toFixed(3)}
-            </label>
-            <input 
-              type="range" 
-              min="-0.5" 
-              max="0.5" 
-              step="0.01" 
-              value={profileA2} 
-              onChange={(e) => setProfileA2(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Profile a₁ (r²): {profileA1.toFixed(3)}
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Top Control Point (Distance from Camera): {controlZ2.toFixed(3)}
             </label>
             <input 
               type="range" 
               min="-1.0" 
               max="1.0" 
-              step="0.05" 
-              value={profileA1} 
-              onChange={(e) => setProfileA1(parseFloat(e.target.value))}
+              step="0.01" 
+              value={controlZ2}
+              onChange={(e) => setControlZ2(parseFloat(e.target.value))}
               style={{ width: '100%' }}
             />
+            <small style={{ color: '#666' }}>Negative = closer to camera, Positive = further away</small>
           </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Profile a₀ (offset): {profileA0.toFixed(3)}
+
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Middle Control Point (Distance from Camera): {controlZ1.toFixed(3)}
             </label>
             <input 
               type="range" 
               min="-1.0" 
               max="1.0" 
-              step="0.05" 
-              value={profileA0} 
-              onChange={(e) => setProfileA0(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Mirror Distance: {mirrorDist.toFixed(2)}
-            </label>
-            <input 
-              type="range" 
-              min="0.5" 
-              max="5.0" 
-              step="0.1" 
-              value={mirrorDist} 
-              onChange={(e) => setMirrorDist(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Mirror Radius: {mirrorRadius.toFixed(2)}
-            </label>
-            <input 
-              type="range" 
-              min="0.5" 
-              max="3.0" 
-              step="0.1" 
-              value={mirrorRadius} 
-              onChange={(e) => setMirrorRadius(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Image Plane Distance: {imagePlaneDist.toFixed(2)}
-            </label>
-            <input 
-              type="range" 
-              min="0.1" 
-              max="2.0" 
-              step="0.05" 
-              value={imagePlaneDist} 
-              onChange={(e) => setImagePlaneDist(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Image Size X: {imageSizeX.toFixed(2)}
-            </label>
-            <input 
-              type="range" 
-              min="0.5" 
-              max="3.0" 
-              step="0.1" 
-              value={imageSizeX} 
-              onChange={(e) => setImageSizeX(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Image Size Y: {imageSizeY.toFixed(2)}
-            </label>
-            <input 
-              type="range" 
-              min="0.5" 
-              max="3.0" 
-              step="0.1" 
-              value={imageSizeY} 
-              onChange={(e) => setImageSizeY(parseFloat(e.target.value))}
-              style={{ width: '100%' }}
-            />
-          </div>
-          
-          <div>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              FOV: {(fov * 180 / Math.PI).toFixed(1)}°
-            </label>
-            <input 
-              type="range" 
-              min={Math.PI / 6} 
-              max={Math.PI * 2 / 3} 
               step="0.01" 
-              value={fov} 
-              onChange={(e) => setFov(parseFloat(e.target.value))}
+              value={controlZ1}
+              onChange={(e) => setControlZ1(parseFloat(e.target.value))}
               style={{ width: '100%' }}
             />
+            <small style={{ color: '#666' }}>Negative = closer to camera, Positive = further away</small>
           </div>
-          
+
+          <div style={{ marginBottom: '0' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Bottom Control Point (Distance from Camera): {controlZ0.toFixed(3)}
+            </label>
+            <input 
+              type="range" 
+              min="-1.0" 
+              max="1.0" 
+              step="0.01" 
+              value={controlZ0}
+              onChange={(e) => setControlZ0(parseFloat(e.target.value))}
+              style={{ width: '100%' }}
+            />
+            <small style={{ color: '#666' }}>Negative = closer to camera, Positive = further away</small>
+          </div>
         </div>
+
+        <details style={{ marginBottom: '15px' }}>
+          <summary style={{ cursor: 'pointer', fontWeight: 'bold', marginBottom: '10px' }}>
+            Additional Mirror Settings
+          </summary>
+          
+          <div style={{ marginTop: '15px', paddingLeft: '20px' }}>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px' }}>
+                Middle Point Y Position: {controlY1Ratio.toFixed(2)} (−1=bottom, 0=center, +1=top)
+              </label>
+              <input 
+                type="range" 
+                min="-1.0" 
+                max="1.0" 
+                step="0.05" 
+                value={controlY1Ratio}
+                onChange={(e) => setControlY1Ratio(parseFloat(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px' }}>
+                Mirror Distance: {mirrorDist.toFixed(2)}
+              </label>
+              <input 
+                type="range" 
+                min="0.5" 
+                max="5.0" 
+                step="0.1" 
+                value={mirrorDist}
+                onChange={(e) => setMirrorDist(parseFloat(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px' }}>
+                Mirror Half-Height: {mirrorHalfHeight.toFixed(2)}
+              </label>
+              <input 
+                type="range" 
+                min="0.5" 
+                max="3.0" 
+                step="0.1" 
+                value={mirrorHalfHeight}
+                onChange={(e) => setMirrorHalfHeight(parseFloat(e.target.value))}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   );
