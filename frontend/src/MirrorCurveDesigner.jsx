@@ -14,6 +14,11 @@ export default function MirrorDesigner({ onCurveChange }) {
   const LINE_BOTTOM = 550;
   const LINE_MIDDLE = 300;
 
+  const MIN_DISTANCE_FROM_AXIS = 50;
+  const MIN_VERTICAL_SPACING = 60;
+  const MIN_DISTANCE_FROM_VERTICAL = 30;
+  const MAX_Y_POSITION = LINE_TOP + 40;
+
   useEffect(() => {
     draw();
     exportData();
@@ -48,7 +53,15 @@ export default function MirrorDesigner({ onCurveChange }) {
     ctx.arc(middlePoint.x, LINE_MIDDLE, 8, 0, Math.PI * 2);
     ctx.fill();
 
-    if (points.length > 0) {
+    if (points.length === 0) {
+      // Default to regular mirror - straight vertical line
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(LINE_X, LINE_TOP);
+      ctx.lineTo(LINE_X, LINE_BOTTOM);
+      ctx.stroke();
+    } else {
       const reflected = [...points].reverse().map(p => ({ 
         x: p.x, 
         y: LINE_MIDDLE + (LINE_MIDDLE - p.y) 
@@ -117,17 +130,23 @@ export default function MirrorDesigner({ onCurveChange }) {
   };
 
   const exportData = () => {
-    if (points.length === 0) {
-      if (onCurveChange) onCurveChange(null);
-      return;
-    }
-
-    const reflected = [...points].reverse().map(p => ({ x: p.x, y: LINE_MIDDLE + (LINE_MIDDLE - p.y) }));
-    const all = [{ x: LINE_X, y: LINE_TOP }, ...points, middlePoint, ...reflected, { x: LINE_X, y: LINE_BOTTOM }];
+    const reflected = points.length > 0 ? 
+      [...points].reverse().map(p => ({ x: p.x, y: LINE_MIDDLE + (LINE_MIDDLE - p.y) })) : 
+      [];
+    
+    const all = points.length > 0 ?
+      [{ x: LINE_X, y: LINE_TOP }, ...points, middlePoint, ...reflected, { x: LINE_X, y: LINE_BOTTOM }] :
+      [{ x: LINE_X, y: LINE_TOP }, { x: LINE_X, y: LINE_BOTTOM }];
     
     const samples = [];
     for (let i = 0; i <= 30; i++) {
-      samples.push(spline(all, i / 30));
+      if (points.length === 0) {
+        // Linear interpolation for default mirror
+        const t = i / 30;
+        samples.push({ x: LINE_X, y: LINE_TOP + t * (LINE_BOTTOM - LINE_TOP) });
+      } else {
+        samples.push(spline(all, i / 30));
+      }
     }
     
     const segs = [];
@@ -146,12 +165,54 @@ export default function MirrorDesigner({ onCurveChange }) {
   };
 
   const handleClick = (e) => {
-    if (points.length >= 2) return;
+    console.log('Click - points:', points.length);
+    if (points.length >= 2) {
+      console.log('Blocked - max points');
+      return;
+    }
+    
     const r = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - r.left;
     const y = e.clientY - r.top;
-    if (x >= LINE_X || y < LINE_TOP || y > LINE_MIDDLE) return;
-    if (points.some(p => Math.sqrt((p.x - x) ** 2 + (p.y - y) ** 2) < 20)) return;
+    
+    console.log('Click at:', x, y);
+    
+    if (x >= LINE_X) {
+      console.log('Blocked - right of line');
+      return;
+    }
+    if (y < LINE_TOP || y > LINE_MIDDLE) {
+      console.log('Blocked - out of bounds');
+      return;
+    }
+    
+    // Must not be too close to vertical line
+    const distFromVertical = LINE_X - x;
+    if (distFromVertical < MIN_DISTANCE_FROM_VERTICAL) {
+      console.log('BLOCKED - too close to vertical line');
+      return;
+    }
+    
+    // Must not be too high (prevents upward curve)
+    if (y < MAX_Y_POSITION) {
+      console.log('BLOCKED - too high, would cause upward curve');
+      return;
+    }
+    
+    // Must be far enough from axis of symmetry
+    if (Math.abs(y - LINE_MIDDLE) < MIN_DISTANCE_FROM_AXIS) {
+      console.log('BLOCKED - too close to horizontal axis');
+      return;
+    }
+    
+    // Check vertical spacing from existing points
+    const hasVerticalConflict = points.some(p => Math.abs(p.y - y) < MIN_VERTICAL_SPACING);
+    if (hasVerticalConflict) {
+      console.log('BLOCKED - insufficient vertical spacing');
+      return;
+    }
+    
+    console.log('Adding point');
     setPoints([...points, { x, y }].sort((a, b) => a.y - b.y));
   };
 
@@ -173,11 +234,40 @@ export default function MirrorDesigner({ onCurveChange }) {
       const x = Math.max(0, Math.min(LINE_X, e.clientX - r.left));
       setMiddlePoint({ x, y: LINE_MIDDLE });
     } else if (draggingPoint !== null) {
-      const x = Math.max(0, Math.min(LINE_X - 1, e.clientX - r.left));
-      const y = Math.max(LINE_TOP, Math.min(LINE_MIDDLE, e.clientY - r.top));
-      const p = [...points];
-      p[draggingPoint] = { x, y };
-      setPoints(p.sort((a, b) => a.y - b.y));
+      let x = Math.max(0, Math.min(LINE_X - 1, e.clientX - r.left));
+      let y = Math.max(LINE_TOP, Math.min(LINE_MIDDLE, e.clientY - r.top));
+      
+      // Enforce minimum distance from vertical line
+      if (LINE_X - x < MIN_DISTANCE_FROM_VERTICAL) {
+        x = LINE_X - MIN_DISTANCE_FROM_VERTICAL;
+      }
+      
+      // Enforce minimum distance from horizontal axis
+      if (Math.abs(y - LINE_MIDDLE) < MIN_DISTANCE_FROM_AXIS) {
+        y = LINE_MIDDLE - MIN_DISTANCE_FROM_AXIS;
+      }
+      
+      // Enforce maximum height
+      if (y < MAX_Y_POSITION) {
+        y = MAX_Y_POSITION;
+      }
+      
+      const newPoints = [...points];
+      newPoints[draggingPoint] = { x, y };
+      const sorted = newPoints.sort((a, b) => a.y - b.y);
+      
+      // Check vertical spacing constraint
+      let valid = true;
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (Math.abs(sorted[i].y - sorted[i+1].y) < MIN_VERTICAL_SPACING) {
+          valid = false;
+          break;
+        }
+      }
+      
+      if (valid) {
+        setPoints(sorted);
+      }
     }
   };
 
