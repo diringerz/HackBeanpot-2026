@@ -17,7 +17,8 @@ export default function MirrorDesigner({ onCurveChange }) {
   const MIN_DISTANCE_FROM_AXIS = 50;
   const MIN_VERTICAL_SPACING = 60;
   const MIN_DISTANCE_FROM_VERTICAL = 30;
-  const MAX_Y_POSITION = LINE_TOP + 40;
+  const MAX_Y_POSITION = LINE_TOP + 80;
+  const MAX_LEFT_DISTANCE = 200;
 
   useEffect(() => {
     draw();
@@ -181,6 +182,13 @@ export default function MirrorDesigner({ onCurveChange }) {
       console.log('Blocked - right of line');
       return;
     }
+    
+    // Enforce maximum left distance
+    if (LINE_X - x > MAX_LEFT_DISTANCE) {
+      console.log('BLOCKED - too far left');
+      return;
+    }
+    
     if (y < LINE_TOP || y > LINE_MIDDLE) {
       console.log('Blocked - out of bounds');
       return;
@@ -231,11 +239,27 @@ export default function MirrorDesigner({ onCurveChange }) {
   const handleMouseMove = (e) => {
     const r = canvasRef.current.getBoundingClientRect();
     if (draggingMiddle) {
-      const x = Math.max(0, Math.min(LINE_X, e.clientX - r.left));
+      let x = Math.max(0, Math.min(LINE_X, e.clientX - r.left));
+      
+      // Enforce maximum left distance for middle point
+      if (LINE_X - x > MAX_LEFT_DISTANCE) {
+        x = LINE_X - MAX_LEFT_DISTANCE;
+      }
+      
+      // Enforce minimum distance from vertical line for middle point
+      if (LINE_X - x < MIN_DISTANCE_FROM_VERTICAL) {
+        x = LINE_X - MIN_DISTANCE_FROM_VERTICAL;
+      }
+      
       setMiddlePoint({ x, y: LINE_MIDDLE });
     } else if (draggingPoint !== null) {
       let x = Math.max(0, Math.min(LINE_X - 1, e.clientX - r.left));
       let y = Math.max(LINE_TOP, Math.min(LINE_MIDDLE, e.clientY - r.top));
+      
+      // Enforce maximum left distance
+      if (LINE_X - x > MAX_LEFT_DISTANCE) {
+        x = LINE_X - MAX_LEFT_DISTANCE;
+      }
       
       // Enforce minimum distance from vertical line
       if (LINE_X - x < MIN_DISTANCE_FROM_VERTICAL) {
