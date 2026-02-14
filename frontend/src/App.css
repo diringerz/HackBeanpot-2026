@@ -1,13 +1,30 @@
+@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 #root {
-  max-width: 1280px;
+  /* max-width: 1280px;
   margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  padding: 1rem;
+  text-align: center; */
+}
+
+
+@font-face {
+    font-family: 'Circus';
+    src: url('/fonts/Circus-gwK5.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+.font-Circus {
+    font-family: 'Circus', sans-serif;
 }
 
 .logo {
   height: 6em;
-  padding: 1.5em;
+  /* padding: 1.5em; */
   will-change: filter;
   transition: filter 300ms;
 }
