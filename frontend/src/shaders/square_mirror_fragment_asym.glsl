@@ -43,6 +43,21 @@ precision highp float;
 
 #define MAX_SEGMENTS 16
 
+// === DEBUG MODE ===
+// 0 = normal rendering
+// 1 = visualize linear path (red where qA is small)
+// 2 = visualize center hits (green where |y| < 0.1)
+// 3 = disable linear fallback entirely
+// 4 = visualize hitPos.y as color gradient (red=bottom, green=center, blue=top)
+// 5 = visualize normal direction (shows normal.y component)
+// 6 = visualize qA magnitude (red=small, white=large)
+// 7 = visualize hit depth (z position) - closer=brighter
+// 8 = visualize image plane X coordinate (see if there's a discontinuity)
+// 9 = visualize fallback root usage (YELLOW where fallback root was used)
+// 10 = visualize b_coeff value (should be 0 for symmetric curve)
+// 11 = visualize screen Y vs hit Y (shows mapping distortion)
+#define DEBUG_MODE 0
+
 // --- Uniforms ---
 
 uniform sampler2D u_webcamTex;
@@ -84,6 +99,10 @@ uniform float u_fov;
 //    ^^^^^^       ^^^^^^^^^^^^^^^^^^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //      qA                   qB                                  qC
 
+// Global variables to track debug info
+bool g_usedLinearPath = false;
+bool g_usedFallbackRoot = false;
+
 float intersectSegment(
     float a, float b_coeff, float c_coeff,
     float yMin, float yMax,
@@ -95,18 +114,43 @@ float intersectSegment(
 
     float t = -1.0;
 
+    #if DEBUG_MODE == 3
+    // Force quadratic path (disable linear fallback)
+    if (false && abs(qA) < 1e-10) {
+    #else
     if (abs(qA) < 1e-10) {
+    #endif
         // Linear: qB·t + qC = 0
+        g_usedLinearPath = true;
         if (abs(qB) < 1e-10) return -1.0;
         t = -qC / qB;
         if (t < 0.001) return -1.0;
+
+        // CRITICAL FIX: Validate Y bounds for linear case
+        float hitY_linear = ro.y + rd.y * t;
+        if (hitY_linear < yMin || hitY_linear > yMax) return -1.0;
     } else {
+        g_usedLinearPath = false;
     float disc = qB * qB - 4.0 * qA * qC;
     if (disc < 0.0) return -1.0;
 
     float sq = sqrt(disc);
-    float t1 = (-qB - sq) / (2.0 * qA);
-    float t2 = (-qB + sq) / (2.0 * qA);
+
+    // Numerical stability fix: use numerically stable quadratic formula
+    // when qA is small to avoid division by near-zero values
+    float t1, t2;
+    if (abs(qA) < 1e-6) {
+        // qA is small but not tiny - use more stable formula
+        // For small qA, use: t ≈ -qC/qB (first order) with correction
+        float t_linear = -qC / qB;
+        // The two roots are approximately t_linear and very large
+        t1 = t_linear;
+        t2 = -2.0 * qC / (qB + sign(qB) * sq); // More stable second root
+    } else {
+        // Normal case
+        t1 = (-qB - sq) / (2.0 * qA);
+        t2 = (-qB + sq) / (2.0 * qA);
+    }
 
         // Pick smallest positive root
     float tMin = min(t1, t2);
@@ -120,6 +164,7 @@ float intersectSegment(
     float hitY = ro.y + rd.y * t;
     if (hitY < yMin || hitY > yMax) {
         // First root was out of domain — try the other root
+        g_usedFallbackRoot = true;
         float disc = qB * qB - 4.0 * qA * qC;
         if (disc < 0.0 || abs(qA) < 1e-10) return -1.0;
         float sq = sqrt(disc);
@@ -131,6 +176,8 @@ float intersectSegment(
         float hitY2 = ro.y + rd.y * tOther;
         if (hitY2 < yMin || hitY2 > yMax) return -1.0;
         t = tOther;
+    } else {
+        g_usedFallbackRoot = false;
     }
 
     return t;
@@ -152,6 +199,19 @@ float intersectSegment(
 
 vec3 computeNormal(float hitY, float a, float b_coeff) {
     float dzdy = 2.0 * a * hitY + b_coeff;
+
+    // Robustness fix: if hitY is very close to 0 for a symmetric curve,
+    // force the normal to be exactly (0, 0, -1) to avoid floating-point
+    // errors causing discontinuities at the mirror center
+    if (abs(hitY) < 1e-5 && abs(b_coeff) < 1e-6) {
+        return vec3(0.0, 0.0, -1.0);
+    }
+
+    // Also clamp dzdy if it's very small
+    if (abs(dzdy) < 1e-6) {
+        dzdy = 0.0;
+    }
+
     return normalize(vec3(0.0, dzdy, -1.0));
 }
 
@@ -214,6 +274,67 @@ void main() {
 
     vec3 hitPos = ro + rd * bestT;
 
+    // === DEBUG VISUALIZATIONS ===
+    #if DEBUG_MODE == 1
+    // Test 1: Visualize linear path usage (RED)
+    if (g_usedLinearPath) {
+        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+        return;
+    }
+    #endif
+
+    #if DEBUG_MODE == 2
+    // Test 2: Visualize center hits (GREEN for |y| < 0.1)
+    if (abs(hitPos.y) < 0.01) {
+        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0);
+        return;
+    }
+    #endif
+
+    #if DEBUG_MODE == 9
+    // Test 9: Visualize fallback root usage (YELLOW)
+    if (g_usedFallbackRoot) {
+        gl_FragColor = vec4(1.0, 1.0, 0.0, 1.0);
+        return;
+    }
+    #endif
+
+    #if DEBUG_MODE == 11
+    // Test 11: Visualize screen Y vs world hit Y
+    // Show difference to see distortion
+    vec2 ndc = (gl_FragCoord.xy / u_resolution) * 2.0 - 1.0;
+    float screenY = ndc.y;
+    float worldY = hitPos.y;
+
+    // Normalize world Y to [-1, 1] range
+    float worldYNorm = worldY / u_mirrorHalfHeight;
+
+    // Visualize the difference
+    float diff = abs(screenY - worldYNorm);
+    gl_FragColor = vec4(diff, 1.0 - diff, 0.0, 1.0); // More yellow = more distortion
+    return;
+    #endif
+
+    #if DEBUG_MODE == 4
+    // Test 4: Visualize hitPos.y as gradient
+    // Map y from [-mirrorHalfHeight, +mirrorHalfHeight] to color
+    float yNorm = (hitPos.y + u_mirrorHalfHeight) / (2.0 * u_mirrorHalfHeight); // 0 to 1
+    gl_FragColor = vec4(1.0 - yNorm, abs(yNorm - 0.5) * 2.0, yNorm, 1.0);
+    return;
+    #endif
+
+    #if DEBUG_MODE == 6
+    // Test 6: Visualize qA magnitude to see where it's small
+    // Need to recalculate it here
+    vec4 seg = u_segments[bestSeg];
+    float a = seg.x;
+    float qA_vis = a * rd.y * rd.y;
+    float qA_mag = abs(qA_vis) * 10000.0; // Scale for visibility
+    qA_mag = clamp(qA_mag, 0.0, 1.0);
+    gl_FragColor = vec4(1.0 - qA_mag, qA_mag, 0.0, 1.0); // Red=small, green=large
+    return;
+    #endif
+
     // --- Retrieve winning segment coefficients ---
     float segA = 0.0;
     float segB = 0.0;
@@ -225,8 +346,35 @@ void main() {
         }
     }
 
+    #if DEBUG_MODE == 10
+    // Test 10: Visualize b_coeff (should be 0 for symmetric curve)
+    float bMag = abs(segB) * 1000.0; // Scale for visibility
+    bMag = clamp(bMag, 0.0, 1.0);
+    if (abs(segB) < 0.0001) {
+        gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); // GREEN if near zero
+    } else if (segB > 0.0) {
+        gl_FragColor = vec4(0.0, 0.0, bMag, 1.0); // BLUE if positive
+    } else {
+        gl_FragColor = vec4(bMag, 0.0, 0.0, 1.0); // RED if negative
+    }
+    return;
+    #endif
+
     // --- Normal ---
     vec3 N = computeNormal(hitPos.y, segA, segB);
+
+    #if DEBUG_MODE == 5
+    // Test 5: Visualize normal direction
+    // Show normal.y component (should be 0 at center for symmetric curve)
+    float normalY = N.y;
+    vec3 normalColor = vec3(
+        normalY < 0.0 ? -normalY : 0.0,  // Red for negative
+        abs(normalY),                     // Green for magnitude
+        normalY > 0.0 ? normalY : 0.0     // Blue for positive
+    );
+    gl_FragColor = vec4(normalColor, 1.0);
+    return;
+    #endif
 
     // --- Reflect ---
     vec3 reflDir = reflect(rd, N);
@@ -240,9 +388,26 @@ void main() {
     float tImg = (-u_imagePlaneDist - hitPos.z) / reflDir.z;
     vec3 imgHit = hitPos + reflDir * tImg;
 
+    #if DEBUG_MODE == 7
+    // Test 7: Visualize hit depth (z position)
+    // Normalize z relative to mirror distance
+    float zNorm = (hitPos.z - (u_mirrorDist - 0.5)) / 1.0; // Adjust range as needed
+    zNorm = clamp(zNorm, 0.0, 1.0);
+    gl_FragColor = vec4(vec3(zNorm), 1.0); // Brighter = closer to camera
+    return;
+    #endif
+
     vec2 imgUV = imgHit.xy / u_imageSize + 0.5;
     imgUV.x = 1.0 - imgUV.x;
     imgUV.y = 1.0 - imgUV.y;  // Flip Y to match webcam texture orientation
+
+    #if DEBUG_MODE == 8
+    // Test 8: Visualize image plane X coordinate
+    // Show imgHit.x as color to see if there's a discontinuity
+    float xNorm = (imgHit.x / u_imageSize.x) + 0.5;
+    gl_FragColor = vec4(xNorm, 1.0 - xNorm, 0.5, 1.0);
+    return;
+    #endif
 
     if (imgUV.x < 0.0 || imgUV.x > 1.0 || imgUV.y < 0.0 || imgUV.y > 1.0) {
         gl_FragColor = vec4(0.02, 0.02, 0.03, 1.0);

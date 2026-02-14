@@ -19,9 +19,9 @@ export default function SimpleWebcam() {
   // P₀ = (yMin, z₀) - bottom edge at y=-mirrorHalfHeight
   // P₁ = (y₁, z₁) - middle control point
   // P₂ = (yMax, z₂) - top edge at y=+mirrorHalfHeight
-  const [controlZ0, setControlZ0] = useState(0.0);      // z-depth at bottom
-  const [controlZ1, setControlZ1] = useState(-0.3);     // z-depth of middle control point
-  const [controlZ2, setControlZ2] = useState(0.0);      // z-depth at top
+  const [controlZ0, setControlZ0] = useState(-0.3);      // z-depth at bottom
+  const [controlZ1, setControlZ1] = useState(-0.6);     // z-depth of middle control point
+  const [controlZ2, setControlZ2] = useState(-0.3);      // z-depth at top
   const [controlY1Ratio, setControlY1Ratio] = useState(0.0); // y₁ position as ratio (-1 to 1, where 0 = center)
   
   const [mirrorDist, setMirrorDist] = useState(2.0);  // distance from camera
