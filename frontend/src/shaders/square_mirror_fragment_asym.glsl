@@ -101,16 +101,16 @@ float intersectSegment(
         t = -qC / qB;
         if (t < 0.001) return -1.0;
     } else {
-        float disc = qB * qB - 4.0 * qA * qC;
-        if (disc < 0.0) return -1.0;
+    float disc = qB * qB - 4.0 * qA * qC;
+    if (disc < 0.0) return -1.0;
 
-        float sq = sqrt(disc);
-        float t1 = (-qB - sq) / (2.0 * qA);
-        float t2 = (-qB + sq) / (2.0 * qA);
+    float sq = sqrt(disc);
+    float t1 = (-qB - sq) / (2.0 * qA);
+    float t2 = (-qB + sq) / (2.0 * qA);
 
         // Pick smallest positive root
-        float tMin = min(t1, t2);
-        float tMax = max(t1, t2);
+    float tMin = min(t1, t2);
+    float tMax = max(t1, t2);
         t = (tMin > 0.001) ? tMin : ((tMax > 0.001) ? tMax : -1.0);
     }
 
@@ -242,6 +242,7 @@ void main() {
 
     vec2 imgUV = imgHit.xy / u_imageSize + 0.5;
     imgUV.x = 1.0 - imgUV.x;
+    imgUV.y = 1.0 - imgUV.y;  // Flip Y to match webcam texture orientation
 
     if (imgUV.x < 0.0 || imgUV.x > 1.0 || imgUV.y < 0.0 || imgUV.y > 1.0) {
         gl_FragColor = vec4(0.02, 0.02, 0.03, 1.0);
