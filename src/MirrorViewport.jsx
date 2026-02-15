@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import ClassicMirrorViewport from './ClassicMirrorViewport';
 import RayTracedMirror from './RayTracedMirror';
 
@@ -132,13 +133,37 @@ const convertCurveDataToSegments = (curveData) => {
 };
 
 export default function MirrorViewport({ videoRef, curveData, rotation, isActive, useRayTracing }) {
+  // State for mirror distance (adjustable with W/S keys in ray tracing mode)
+  const [mirrorDist, setMirrorDist] = useState(3.5);
+  
+  // Keyboard controls for adjusting mirror distance (W/S keys in ray tracing mode)
+  useEffect(() => {
+    if (!useRayTracing) return; // Only enable for ray tracing mode
+    
+    const handleKeyDown = (e) => {
+      const key = e.key.toLowerCase();
+      const step = 0.1; // Distance step per key press
+      
+      if (key === 'w') {
+        // W key moves mirror further (increases distance)
+        setMirrorDist(prev => Math.min(10.0, prev + step));
+      } else if (key === 's') {
+        // S key brings mirror closer (reduces distance)
+        setMirrorDist(prev => Math.max(0.5, prev - step));
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [useRayTracing]);
+  
   return (
     <div className="w-full h-full flex items-center justify-center">
       {useRayTracing ? (
         <RayTracedMirror
           videoRef={videoRef}
           curveSegments={convertCurveDataToSegments(curveData)}
-          mirrorDist={3.5}
+          mirrorDist={mirrorDist}
           mirrorHalfWidth={2.0}
           mirrorHalfHeight={2.0}
           imagePlaneDist={1.0}

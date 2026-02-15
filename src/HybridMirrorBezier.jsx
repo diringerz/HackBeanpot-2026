@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { splineToQuadraticBezier } from './splineToQuadraticBezier.js';
+import Button from './components/Button';
 
 /**
  * Hybrid Bezier Designer
@@ -352,51 +353,92 @@ export default function HybridMirrorBezier({ onCurveChange }) {
     }
   };
 
+  // Preset handlers
+  const setConvexMirror = () => {
+    // Convex mirror - bulges outward (to the left)
+    const newPoint = {
+      x: LINE_X - 120, // Left of the vertical line
+      y: LINE_TOP + (LINE_BOTTOM - LINE_TOP) / 2, // Middle vertically
+      id: nextIdRef.current++
+    };
+    setPoints([newPoint]);
+  };
+
+  const setConcaveMirror = () => {
+    // Concave mirror - curves inward (to the right)
+    // Strong curvature to create focal point effect that flips the image
+    const newPoint = {
+      x: LINE_X + 195, // Far right for dramatic curvature
+      y: LINE_TOP + (LINE_BOTTOM - LINE_TOP) / 2, // Middle vertically
+      id: nextIdRef.current++
+    };
+    setPoints([newPoint]);
+  };
+
+  const clearMirror = () => {
+    setPoints([]);
+  };
+
   return (
-    <div className="w-full h-full flex items-center justify-center relative overflow-hidden rounded-2xl" style={{
-      background: 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 50%, #94a3b8 100%)'
-    }}>
-      {/* Static sparkle dots */}
-      <div className="absolute inset-0 pointer-events-none">
-        {[...Array(30)].map((_, i) => {
-          const seed = 12345;
-          const random = (idx) => {
-            const x = Math.sin(idx * seed) * 10000;
-            return x - Math.floor(x);
-          };
-          const x = random(i) * 100;
-          const y = random(i + 100) * 100;
-          const size = 1 + random(i + 200) * 2;
-          const opacity = 0.2 + random(i + 300) * 0.3;
-          return (
-            <div
-              key={i}
-              className="absolute rounded-full"
-              style={{
-                left: `${x}%`,
-                top: `${y}%`,
-                width: `${size}px`,
-                height: `${size}px`,
-                backgroundColor: `rgba(248, 250, 252, ${opacity})`,
-                boxShadow: `0 0 ${size * 2}px rgba(255, 255, 255, ${opacity * 0.5})`,
-              }}
-            />
-          );
-        })}
+    <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+      <div className="flex-1 w-full flex items-center justify-center relative overflow-hidden rounded-2xl" style={{
+        background: 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 50%, #94a3b8 100%)'
+      }}>
+        {/* Static sparkle dots */}
+        <div className="absolute inset-0 pointer-events-none">
+          {[...Array(30)].map((_, i) => {
+            const seed = 12345;
+            const random = (idx) => {
+              const x = Math.sin(idx * seed) * 10000;
+              return x - Math.floor(x);
+            };
+            const x = random(i) * 100;
+            const y = random(i + 100) * 100;
+            const size = 1 + random(i + 200) * 2;
+            const opacity = 0.2 + random(i + 300) * 0.3;
+            return (
+              <div
+                key={i}
+                className="absolute rounded-full"
+                style={{
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  width: `${size}px`,
+                  height: `${size}px`,
+                  backgroundColor: `rgba(248, 250, 252, ${opacity})`,
+                  boxShadow: `0 0 ${size * 2}px rgba(255, 255, 255, ${opacity * 0.5})`,
+                }}
+              />
+            );
+          })}
+        </div>
+        
+        <canvas
+          ref={canvasRef}
+          width={WIDTH}
+          height={HEIGHT}
+          className="relative z-10 w-full h-full object-contain cursor-crosshair"
+          onClick={handleClick}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onContextMenu={handleRightClick}
+        />
       </div>
       
-      <canvas
-        ref={canvasRef}
-        width={WIDTH}
-        height={HEIGHT}
-        className="relative z-10 w-full h-full object-contain cursor-crosshair"
-        onClick={handleClick}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onContextMenu={handleRightClick}
-      />
+      {/* Preset Buttons */}
+      <div className="flex gap-3 pb-4">
+        <Button onClick={setConvexMirror} variant="outline">
+          Convex Mirror
+        </Button>
+        <Button onClick={setConcaveMirror} variant="outline">
+          Concave Mirror
+        </Button>
+        <Button onClick={clearMirror} variant="outline">
+          Clear
+        </Button>
+      </div>
     </div>
   );
 }
