@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Mirror from "./MirrorCurveDesigner";
 import './App.css';
 import FunhouseMirrorWebcam from './FunhouseMirrorWebcam';
+import Button from './components/Button';
 
 export default function App() {
   const [isDay, setIsDay] = useState(false);
@@ -12,7 +13,7 @@ export default function App() {
   const videoRef = useRef(null);
   const [isActive, setIsActive] = useState(false);
   const [rotation, setRotation] = useState(0);
-  const [useRayTracing, setUseRayTracing] = useState(false);
+  const [useRayTracing, setUseRayTracing] = useState(true);
 
   const handleCurveChange = (curveData) => {
     console.log('App received curve data:', curveData);
@@ -70,21 +71,30 @@ export default function App() {
 
   const handleBackToDesigner = () => {
     stopCamera();
-    setUseRayTracing(false);
+    setUseRayTracing(true);
     setRotation(0);
     setIsDone(false);
   };
+
+  // Auto-start camera when isDone is true
+  useEffect(() => {
+    if (isDone && !isActive) {
+      startCamera();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDone]);
 
   return (
     <div className="relative min-h-screen overflow-hidden text-white">
 
       {/* Toggle Button */}
-      <button
+      <Button
         onClick={() => setIsDay(!isDay)}
-        className="absolute z-20 top-5 right-5 bg-white/80 text-black px-4 py-2 rounded-lg shadow-md hover:bg-white"
+        className="absolute z-20 top-5 right-5 bg-white/80! text-black! shadow-md! hover:bg-white!"
+        variant="outline"
       >
         {isDay ? "Switch to Night" : "Switch to Day"}
-      </button>
+      </Button>
 
       {/* Background SVG */}
       <svg
@@ -412,12 +422,13 @@ export default function App() {
             {!isDone ? (
               <>
                 <Mirror onCurveChange={handleCurveChange}/>
-                <button
+                <Button
                   onClick={() => setIsDone(true)}
-                  className="absolute bottom-4 right-4 bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-bold shadow-lg z-30"
+                  className="absolute bottom-4 right-4 bg-green-500! hover:bg-green-600! z-30"
+                  variant="primary"
                 >
                   Done
-                </button>
+                </Button>
               </>
             ) : (
               <FunhouseMirrorWebcam
@@ -434,40 +445,30 @@ export default function App() {
         {/* All control buttons in one row below the box */}
         {isDone && (
           <div className="flex gap-3 flex-wrap justify-center">
-            <button
+            <Button
               onClick={handleBackToDesigner}
-              className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg shadow-lg transition-colors"
+              className="bg-blue-500! hover:bg-blue-600!"
+              variant="primary"
             >
               ← Back to Designer
-            </button>
-            <button 
-              onClick={startCamera} 
-              disabled={isActive}
-              className="px-6 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
-            >
-              Start Camera
-            </button>
-            <button 
-              onClick={stopCamera} 
-              disabled={!isActive}
-              className="px-6 py-2 bg-red-500 hover:bg-red-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
-            >
-              Stop Camera
-            </button>
-            <button 
-              onClick={rotateDistortion} 
-              disabled={!mirrorCurve}
-              className="px-6 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
-            >
-              Rotate 90°
-            </button>
-            <button 
+            </Button>
+            {!useRayTracing && (
+              <Button 
+                onClick={rotateDistortion} 
+                disabled={!mirrorCurve}
+                variant="primary"
+              >
+                Rotate Effect 90°
+              </Button>
+            )}
+            <Button 
               onClick={toggleRayTracing} 
               disabled={!isActive}
-              className="px-6 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
+              className="bg-blue-500! hover:bg-blue-600!"
+              variant="primary"
             >
               {useRayTracing ? 'Classic Mode' : 'Ray Traced'}
-            </button>
+            </Button>
           </div>
         )}
       </div>

@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import Button from './components/Button';
 
 export default function AssymMirrorDesigner({ onCurveChange }) {
   const canvasRef = useRef(null);
@@ -263,7 +264,7 @@ export default function AssymMirrorDesigner({ onCurveChange }) {
     <div className="w-full h-full flex flex-col">
       <div className="p-4">
         <h2 className="text-xl font-bold mb-2">Mirror Designer</h2>
-        <button onClick={() => setPoints([])} className="px-4 py-2 bg-slate-500 text-white rounded">Clear</button>
+        <Button onClick={() => setPoints([])} className="bg-slate-500! hover:bg-slate-600! px-4! py-2!" variant="primary">Clear</Button>
         <p className="mt-2">Points: {points.length}/{MAX_POINTS}</p>
       </div>
       <div className="flex-1 flex items-center justify-center relative overflow-hidden rounded-2xl" style={{
