@@ -1,7 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { splineToQuadraticBezier } from './splineToQuadraticBezier.js';
 
-export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
+/**
+ * Hybrid Bezier Designer
+ * - First click: Direct bezier calculation (control point positioned so curve passes through at t=0.5)
+ * - Second+ clicks: Anchor points with spline interpolation and bezier conversion
+ */
+export default function HybridMirrorBezier({ onCurveChange }) {
   const canvasRef = useRef(null);
   const [points, setPoints] = useState([]);
   const [draggingPointId, setDraggingPointId] = useState(null);
@@ -25,20 +30,17 @@ export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
     const canvas = canvasRef.current;
     const r = canvas.getBoundingClientRect();
     
-    // Calculate the actual rendered size accounting for object-contain
     const canvasAspect = WIDTH / HEIGHT;
     const containerAspect = r.width / r.height;
     
     let renderWidth, renderHeight, offsetX, offsetY;
     
     if (containerAspect > canvasAspect) {
-      // Container is wider - canvas is limited by height
       renderHeight = r.height;
       renderWidth = renderHeight * canvasAspect;
       offsetX = (r.width - renderWidth) / 2;
       offsetY = 0;
     } else {
-      // Container is taller - canvas is limited by width
       renderWidth = r.width;
       renderHeight = renderWidth / canvasAspect;
       offsetX = 0;
@@ -54,12 +56,34 @@ export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
     };
   };
 
+  // Catmull-Rom spline interpolation
+  const spline = (pts, t) => {
+    const n = pts.length - 1;
+    const scaled = t * n;
+    const i = Math.floor(scaled);
+    const lt = scaled - i;
+    
+    if (i >= n) return pts[n];
+    
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[Math.min(n, i + 1)];
+    const p3 = pts[Math.min(n, i + 2)];
+    
+    const t2 = lt * lt;
+    const t3 = t2 * lt;
+    
+    return {
+      x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * lt + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+      y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * lt + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
+    };
+  };
+
   const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    // Clear canvas to transparent
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
 
     // Vertical line - chrome gradient
@@ -99,8 +123,29 @@ export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
       ctx.lineTo(LINE_X, LINE_BOTTOM);
       ctx.stroke();
       ctx.shadowBlur = 0;
+    } else if (points.length === 1) {
+      // FIRST POINT: Direct bezier - curve passes through point at t=0.5
+      const userPt = points[0];
+      const cpx = 2 * userPt.x - 0.5 * (LINE_X + LINE_X);
+      const cpy = 2 * userPt.y - 0.5 * (LINE_TOP + LINE_BOTTOM);
+      
+      // Draw the bezier curve
+      const curveGradient = ctx.createLinearGradient(0, LINE_TOP, 0, LINE_BOTTOM);
+      curveGradient.addColorStop(0, '#475569');
+      curveGradient.addColorStop(0.5, '#64748b');
+      curveGradient.addColorStop(1, '#475569');
+      ctx.strokeStyle = curveGradient;
+      ctx.lineWidth = 6;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = '#94a3b8';
+      ctx.beginPath();
+      ctx.moveTo(LINE_X, LINE_TOP);
+      ctx.quadraticCurveTo(cpx, cpy, LINE_X, LINE_BOTTOM);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
     } else {
-      const all = [
+      // MULTIPLE POINTS: Spline interpolation
+      const anchorPoints = [
         { x: LINE_X, y: LINE_TOP },
         ...points,
         { x: LINE_X, y: LINE_BOTTOM }
@@ -119,7 +164,7 @@ export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
       
       for (let i = 0; i <= 100; i++) {
         const t = i / 100;
-        const p = spline(all, t);
+        const p = spline(anchorPoints, t);
         if (i === 0) {
           ctx.moveTo(p.x, p.y);
         } else {
@@ -129,72 +174,85 @@ export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
       
       ctx.stroke();
       ctx.shadowBlur = 0;
-
-      // Draw control points
-      points.forEach((p) => {
-        const gradient = ctx.createRadialGradient(p.x - 3, p.y - 3, 2, p.x, p.y, 10);
-        gradient.addColorStop(0, '#f8fafc');
-        gradient.addColorStop(0.5, '#cbd5e1');
-        gradient.addColorStop(1, '#64748b');
-        ctx.fillStyle = gradient;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = '#94a3b8';
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.shadowBlur = 0;
-        ctx.beginPath();
-        ctx.arc(p.x - 3, p.y - 3, 3, 0, Math.PI * 2);
-        ctx.fill();
-      });
     }
-  };
 
-  const spline = (pts, t) => {
-    const n = pts.length - 1;
-    const scaled = t * n;
-    const i = Math.floor(scaled);
-    const lt = scaled - i;
-    
-    if (i >= n) return pts[n];
-    
-    const p0 = pts[Math.max(0, i - 1)];
-    const p1 = pts[i];
-    const p2 = pts[Math.min(n, i + 1)];
-    const p3 = pts[Math.min(n, i + 2)];
-    
-    const t2 = lt * lt;
-    const t3 = t2 * lt;
-    
-    return {
-      x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * lt + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
-      y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * lt + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3)
-    };
+    // Draw user points (blue)
+    points.forEach((p) => {
+      const gradient = ctx.createRadialGradient(p.x - 3, p.y - 3, 2, p.x, p.y, 10);
+      gradient.addColorStop(0, '#dbeafe');
+      gradient.addColorStop(0.5, '#60a5fa');
+      gradient.addColorStop(1, '#2563eb');
+      ctx.fillStyle = gradient;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = '#60a5fa';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.arc(p.x - 3, p.y - 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
   };
 
   const exportData = () => {
-    const all = points.length > 0 ?
-      [{ x: LINE_X, y: LINE_TOP }, ...points, { x: LINE_X, y: LINE_BOTTOM }] :
-      [{ x: LINE_X, y: LINE_TOP }, { x: LINE_X, y: LINE_BOTTOM }];
-    
-    // Generate quadratic Bezier curves from the spline
-    const quadraticBeziers = all.length > 1 ? splineToQuadraticBezier(all, 1.0) : [];
-    
+    let quadraticBeziers = [];
     const samples = [];
-    for (let i = 0; i <= 30; i++) {
-      const t = i / 30;
-      if (points.length === 0) {
+    
+    if (points.length === 0) {
+      // Straight line
+      for (let i = 0; i <= 30; i++) {
+        const t = i / 30;
         samples.push({ x: LINE_X, y: LINE_TOP + t * (LINE_BOTTOM - LINE_TOP) });
-      } else {
-        samples.push(spline(all, t));
+      }
+    } else if (points.length === 1) {
+      // FIRST POINT: Direct bezier
+      const userPt = points[0];
+      const cpx = 2 * userPt.x - 0.5 * (LINE_X + LINE_X);
+      const cpy = 2 * userPt.y - 0.5 * (LINE_TOP + LINE_BOTTOM);
+      
+      quadraticBeziers = [{
+        start: { x: LINE_X, y: LINE_TOP },
+        cp: { x: cpx, y: cpy },
+        end: { x: LINE_X, y: LINE_BOTTOM }
+      }];
+      
+      // Sample the bezier
+      for (let i = 0; i <= 30; i++) {
+        const t = i / 30;
+        const mt = 1 - t;
+        const x = mt * mt * LINE_X + 2 * mt * t * cpx + t * t * LINE_X;
+        const y = mt * mt * LINE_TOP + 2 * mt * t * cpy + t * t * LINE_BOTTOM;
+        samples.push({ x, y });
+      }
+    } else {
+      // MULTIPLE POINTS: Spline interpolation
+      const anchorPoints = [
+        { x: LINE_X, y: LINE_TOP },
+        ...points,
+        { x: LINE_X, y: LINE_BOTTOM }
+      ];
+      
+      // Convert spline to quadratic beziers
+      quadraticBeziers = splineToQuadraticBezier(anchorPoints, 1.0);
+      
+      // Sample the spline
+      for (let i = 0; i <= 30; i++) {
+        const t = i / 30;
+        samples.push(spline(anchorPoints, t));
       }
     }
     
     const segs = [];
     for (let i = 0; i < samples.length - 1; i++) {
-      segs.push({ x1: samples[i].x, y1: samples[i].y, x2: samples[i + 1].x, y2: samples[i + 1].y });
+      segs.push({ 
+        x1: samples[i].x, 
+        y1: samples[i].y, 
+        x2: samples[i + 1].x, 
+        y2: samples[i + 1].y 
+      });
     }
 
     if (onCurveChange) {
@@ -253,11 +311,11 @@ export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
     let x = rawX;
     let y = rawY;
     
-    // Clamp to canvas bounds with extension on both sides
+    // Clamp to canvas bounds
     x = Math.max(LINE_X - MAX_LEFT_DISTANCE, Math.min(LINE_X + MAX_RIGHT_DISTANCE, x));
     y = Math.max(LINE_TOP, Math.min(LINE_BOTTOM, y));
     
-    // Enforce minimum distance from vertical line (dead zone)
+    // Enforce minimum distance from vertical line
     if (Math.abs(x - LINE_X) < MIN_DISTANCE_FROM_VERTICAL) {
       x = x < LINE_X ? LINE_X - MIN_DISTANCE_FROM_VERTICAL : LINE_X + MIN_DISTANCE_FROM_VERTICAL;
     }
@@ -298,7 +356,7 @@ export default function AsymmetricMirrorCurveDesigner({ onCurveChange }) {
     <div className="w-full h-full flex items-center justify-center relative overflow-hidden rounded-2xl" style={{
       background: 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 50%, #94a3b8 100%)'
     }}>
-      {/* Static sparkle dots in the background */}
+      {/* Static sparkle dots */}
       <div className="absolute inset-0 pointer-events-none">
         {[...Array(30)].map((_, i) => {
           const seed = 12345;

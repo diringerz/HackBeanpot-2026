@@ -180,7 +180,7 @@ function cubicToQuadraticAdaptive(cubic, tolerance = 1.0) {
  * @param {number} tolerance - Maximum approximation error in pixels (default 1.0)
  * @returns {Array} Array of quadratic Bezier curves
  */
-export function splineToQuadraticBezier(points, tolerance = 1.0) {
+export function splineToQuadraticBezier(points, tolerance = 0.5) {
   if (points.length < 2) {
     return [];
   }

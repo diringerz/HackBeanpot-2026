@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import Mirror from "./MirrorCurveDesigner";
+// import Mirror from "./MirrorCurveDesigner";
+// import Mirror from "./AsymmetricMirrorCurveDesigner";
+// import Mirror from "./AsymmetricMirrorBezier";
+import Mirror from "./HybridMirrorBezier";
 import './App.css';
 import FunhouseMirrorWebcam from './FunhouseMirrorWebcam';
 import Button from './components/Button';
