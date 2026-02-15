@@ -1,6 +1,6 @@
 # 🎪 MIRROROR - Carnival Funhouse Mirror Experience
 
-A interactive web application that lets you design custom funhouse mirror curves and apply them to your webcam in real-time. Built with React and Vite, featuring a whimsical carnival theme complete with floating balloons, a ferris wheel, and twinkling stars.
+An interactive web application that lets you design custom funhouse mirror curves and apply them to your webcam in real-time. Built with React and Vite, featuring a whimsical carnival theme complete with floating balloons, a ferris wheel, and twinkling stars.
 
 ![Mirroror Banner](public/preview.png)
 
@@ -100,7 +100,8 @@ public/
 ### FunhouseMirrorWebcam
 - Real-time webcam feed processing
 - Pixel-by-pixel distortion based on mirror curve data
-- requestAnimationFrame for smooth rendering
+- RequestAnimationFrame for smooth rendering
+- Option to rotate mirror in 90 degree increments
 
 ### App (Carnival Scene)
 - Live Ray Tracing straight from your camera 
