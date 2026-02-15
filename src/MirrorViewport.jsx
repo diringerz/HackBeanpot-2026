@@ -1,8 +1,70 @@
 import ClassicMirrorViewport from './ClassicMirrorViewport';
 import RayTracedMirror from './RayTracedMirror';
 
-// Convert MirrorCurveDesigner data to RayTracedMirror format
+// Convert quadratic Bezier curves from MirrorCurveDesigner to RayTracedMirror format
+const convertBezierCurvesToSegments = (curveData) => {
+  console.log('[convertBezierCurvesToSegments] Input curveData:', curveData);
+  
+  // Check if we have the new quadratic Bezier data
+  if (!curveData || !curveData.quadraticBeziers || curveData.quadraticBeziers.length === 0) {
+    // Default to a flat mirror - normalized coordinates
+    const defaultSegment = [{
+      yMin: -0.4,  // Physical coordinates matching mirrorHalfHeight
+      yMax: 0.4,
+      z0: 0.0,     // At the mirror plane
+      z1: 0.0,
+      z2: 0.0
+    }];
+    console.log('[convertBezierCurvesToSegments] Using default flat mirror:', defaultSegment);
+    return defaultSegment;
+  }
+
+  // Get bounds from curve data
+  const bounds = curveData.bounds;
+  const canvasHeight = bounds.yBottom - bounds.yTop;  // e.g., 550 - 50 = 500
+  const canvasWidth = bounds.x;  // e.g., 400 (the centerline x position)
+  
+  // Physical dimensions for the shader (matching the mirror parameters)
+  const physicalHalfHeight = 2.0;  // Make mirror much taller
+  const physicalMaxDepth = 1.0;    // Increase max curve depth
+  
+  console.log('[convertBezierCurvesToSegments] Canvas bounds:', { 
+    yTop: bounds.yTop, 
+    yBottom: bounds.yBottom, 
+    x: bounds.x,
+    canvasHeight 
+  });
+
+  // Convert quadratic Bezier curves to raytracer format
+  const result = curveData.quadraticBeziers.map(bezier => {
+    // Convert y coordinates from canvas pixels to physical coordinates
+    const yStartPhysical = ((bezier.start.y - bounds.yTop) / canvasHeight) * (2 * physicalHalfHeight) - physicalHalfHeight;
+    const yEndPhysical = ((bezier.end.y - bounds.yTop) / canvasHeight) * (2 * physicalHalfHeight) - physicalHalfHeight;
+    
+    const yMin = Math.min(yStartPhysical, yEndPhysical);
+    const yMax = Math.max(yStartPhysical, yEndPhysical);
+    
+    // Convert x (depth) coordinates from canvas pixels to physical depth
+    // Pixels to the left of centerline (x < bounds.x) represent curve toward viewer (negative z)
+    // Negate so curves toward viewer are negative (closer to camera)
+    const z0 = -((bounds.x - bezier.start.x) / canvasWidth * physicalMaxDepth);
+    const z1 = -((bounds.x - bezier.cp.x) / canvasWidth * physicalMaxDepth);  // Control point
+    const z2 = -((bounds.x - bezier.end.x) / canvasWidth * physicalMaxDepth);
+    
+    return { yMin, yMax, z0, z1, z2 };
+  });
+  
+  console.log('[convertBezierCurvesToSegments] Converted', result.length, 'quadratic Bezier curves to physical coordinates:', result);
+  return result;
+};
+
+// Legacy converter - keeping for backwards compatibility with classic mode
 const convertCurveDataToSegments = (curveData) => {
+  // If we have Bezier curves, use the new converter
+  if (curveData && curveData.quadraticBeziers && curveData.quadraticBeziers.length > 0) {
+    return convertBezierCurvesToSegments(curveData);
+  }
+  
   console.log('[convertCurveDataToSegments] Input curveData:', curveData);
   
   if (!curveData || !curveData.lineSegments || curveData.lineSegments.length === 0) {
