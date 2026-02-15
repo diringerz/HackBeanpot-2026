@@ -429,13 +429,17 @@ export default function HybridMirrorBezier({ onCurveChange }) {
       
       {/* Preset Buttons */}
       <div className="flex gap-3 pb-4">
-        <Button onClick={setConvexMirror} variant="outline">
+        <Button onClick={setConvexMirror} variant="ghost" className="px-3! py-1.5! text-sm!">
           Convex Mirror
         </Button>
-        <Button onClick={setConcaveMirror} variant="outline">
+        <Button onClick={setConcaveMirror} variant="ghost" className="px-3! py-1.5! text-sm!">
           Concave Mirror
         </Button>
-        <Button onClick={clearMirror} variant="outline">
+        <Button 
+          onClick={clearMirror} 
+          variant="ghost" 
+          className={`px-3! py-1.5! text-sm! transition-opacity duration-300 ${points.length === 0 ? 'opacity-0 invisible' : 'opacity-100 visible'}`}
+        >
           Clear
         </Button>
       </div>

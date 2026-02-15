@@ -18,6 +18,10 @@ export default function Button({
     select-none
     disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none
   `;
+
+  const buttonStyle = {
+    fontFamily: 'Cambria, serif'
+  };
   
   const variantClasses = {
     primary: `
@@ -56,6 +60,7 @@ export default function Button({
       onClick={onClick}
       disabled={disabled}
       className={`${baseClasses} ${variantClass} ${className}`}
+      style={buttonStyle}
       {...props}
     >
       {children}
