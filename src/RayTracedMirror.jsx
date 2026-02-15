@@ -2,6 +2,8 @@ import { useRef, useEffect } from 'react';
 import vertexShaderSource from './shaders/curved_mirror_vertex.glsl?raw';
 import fragmentShaderSource from './shaders/square_mirror_fragment_asym.glsl?raw';
 
+const BACKGROUND_COLOR = [1.0, 1.0, 1.0];
+
 export default function RayTracedMirror({
   videoRef,
   curveSegments, // Array of { yMin, yMax, z0, z1, z2 }
@@ -277,7 +279,8 @@ export default function RayTracedMirror({
       gl.uniform1f(gl.getUniformLocation(program, 'u_mirrorHalfHeight'), mirrorHalfHeight);
       gl.uniform1f(gl.getUniformLocation(program, 'u_imagePlaneDist'), imagePlaneDist);
       gl.uniform2f(gl.getUniformLocation(program, 'u_imageSize'), imageSizeX, imageSizeY);
-      gl.uniform1f(gl.getUniformLocation(program, 'u_fov'), fov);
+      gl.uniform1f(gl.getUniformLocation(program, 'u_fov'), fov * Math.PI / 180.0);
+      gl.uniform3f(gl.getUniformLocation(program, 'u_backgroundColor'), ...BACKGROUND_COLOR);
       
       // Bind webcam texture
       gl.activeTexture(gl.TEXTURE0);
@@ -285,7 +288,7 @@ export default function RayTracedMirror({
       gl.uniform1i(gl.getUniformLocation(program, 'u_webcamTex'), 0);
       
       // Clear and draw
-      gl.clearColor(0.0, 0.0, 0.0, 1.0);
+      gl.clearColor(...BACKGROUND_COLOR, 1.0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       

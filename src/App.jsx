@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Mirror from "./MirrorCurveDesigner";
 import './App.css';
 import FunhouseMirrorWebcam from './FunhouseMirrorWebcam';
@@ -7,10 +7,72 @@ export default function App() {
   const [isDay, setIsDay] = useState(false);
   const [mirrorCurve, setMirrorCurve] = useState(null);
   const [isDone, setIsDone] = useState(false);
+  
+  // Camera & viewport control state (lifted up)
+  const videoRef = useRef(null);
+  const [isActive, setIsActive] = useState(false);
+  const [rotation, setRotation] = useState(0);
+  const [useRayTracing, setUseRayTracing] = useState(false);
 
   const handleCurveChange = (curveData) => {
     console.log('App received curve data:', curveData);
     setMirrorCurve(curveData);
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 640, height: 480 } 
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play().then(() => {
+            setIsActive(true);
+          });
+        };
+      }
+    } catch (err) {
+      console.error('Camera error:', err);
+      let errorMessage = 'Camera error: ';
+      
+      if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMessage += 'No camera found. Please connect a camera and try again.';
+      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage += 'Camera access denied. Please allow camera permissions in your browser settings.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage += 'Camera is already in use by another application. Please close other apps using the camera.';
+      } else {
+        errorMessage += err.message;
+      }
+      
+      alert(errorMessage);
+    }
+  };
+
+  const stopCamera = () => {
+    const stream = videoRef.current?.srcObject;
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setIsActive(false);
+  };
+
+  const rotateDistortion = () => {
+    setRotation(prev => (prev + 90) % 360);
+  };
+
+  const toggleRayTracing = () => {
+    setUseRayTracing(prev => !prev);
+  };
+
+  const handleBackToDesigner = () => {
+    stopCamera();
+    setUseRayTracing(false);
+    setRotation(0);
+    setIsDone(false);
   };
 
   return (
@@ -345,7 +407,7 @@ export default function App() {
 
       {/* Floating Camera Box */}
       <div className="relative z-10 flex flex-col items-center justify-center min-h-screen gap-6 py-32">
-        <div className="w-[400px] aspect-video bg-white rounded-3xl shadow-2xl border-8 border-red-500">
+        <div className="w-[600px] aspect-video bg-white rounded-3xl shadow-2xl border-8 border-red-500">
           <div className="w-full h-full bg-black rounded-2xl flex items-center justify-center text-white relative">
             {!isDone ? (
               <>
@@ -358,19 +420,55 @@ export default function App() {
                 </button>
               </>
             ) : (
-              <FunhouseMirrorWebcam curveData={mirrorCurve} />
+              <FunhouseMirrorWebcam
+                videoRef={videoRef}
+                curveData={mirrorCurve}
+                rotation={rotation}
+                isActive={isActive}
+                useRayTracing={useRayTracing}
+              />
             )}
           </div>
         </div>
         
-        {/* Back button outside the box when in webcam mode */}
+        {/* All control buttons in one row below the box */}
         {isDone && (
-          <button
-            onClick={() => setIsDone(false)}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-8 py-3 rounded-lg font-bold shadow-lg text-lg"
-          >
-            ← Back to Designer
-          </button>
+          <div className="flex gap-3 flex-wrap justify-center">
+            <button
+              onClick={handleBackToDesigner}
+              className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg shadow-lg transition-colors"
+            >
+              ← Back to Designer
+            </button>
+            <button 
+              onClick={startCamera} 
+              disabled={isActive}
+              className="px-6 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
+            >
+              Start Camera
+            </button>
+            <button 
+              onClick={stopCamera} 
+              disabled={!isActive}
+              className="px-6 py-2 bg-red-500 hover:bg-red-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
+            >
+              Stop Camera
+            </button>
+            <button 
+              onClick={rotateDistortion} 
+              disabled={!mirrorCurve}
+              className="px-6 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
+            >
+              Rotate 90°
+            </button>
+            <button 
+              onClick={toggleRayTracing} 
+              disabled={!isActive}
+              className="px-6 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-colors"
+            >
+              {useRayTracing ? 'Classic Mode' : 'Ray Traced'}
+            </button>
+          </div>
         )}
       </div>
 

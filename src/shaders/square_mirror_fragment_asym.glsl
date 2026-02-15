@@ -80,6 +80,9 @@ uniform vec2  u_imageSize;
 
 uniform float u_fov;
 
+// Background color when rays miss the mirror or scene
+uniform vec3  u_backgroundColor;
+
 // Distance to background plane (behind camera and webcam feed)
 #define BACKGROUND_PLANE_DIST 5.0
 
@@ -305,7 +308,7 @@ void main() {
 
     // --- No hit ---
     if (bestSeg < 0) {
-        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        gl_FragColor = vec4(u_backgroundColor, 1.0);
         return;
     }
 
@@ -462,8 +465,8 @@ void main() {
             }
         }
         
-        // If we don't hit the background plane, return dark color
-        gl_FragColor = vec4(0.02, 0.02, 0.03, 1.0);
+        // If we don't hit the background plane, return background color
+        gl_FragColor = vec4(u_backgroundColor, 1.0);
         return;
     }
 
