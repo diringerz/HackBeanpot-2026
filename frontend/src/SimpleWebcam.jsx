@@ -15,13 +15,18 @@ export default function SimpleWebcam() {
   const shaderProgramRef = useRef(null);
 
   // Mirror parameters (state)
-  // Quadratic Bézier control points in y-space (full cross-section)
-  // P₀ = (yMin, z₀) - bottom edge at y=-mirrorHalfHeight
-  // P₁ = (y₁, z₁) - middle control point
-  // P₂ = (yMax, z₂) - top edge at y=+mirrorHalfHeight
-  const [controlZ0, setControlZ0] = useState(-0.3);      // z-depth at bottom
-  const [controlZ1, setControlZ1] = useState(-0.6);     // z-depth of middle control point
-  const [controlZ2, setControlZ2] = useState(-0.3);      // z-depth at top
+  // Piecewise Quadratic Bézier control points in y-space
+  
+  // Bottom segment: y ∈ [-mirrorHalfHeight, 0]
+  const [bottomZ0, setBottomZ0] = useState(-0.3);       // z-depth at bottom edge (y = -mirrorHalfHeight)
+  const [bottomZ1, setBottomZ1] = useState(-0.6);       // z-depth of bottom segment control point
+  const [bottomZ2, setBottomZ2] = useState(-0.3);       // z-depth at center (y = 0)
+  
+  // Top segment: y ∈ [0, +mirrorHalfHeight]
+  const [topZ0, setTopZ0] = useState(-0.3);             // z-depth at center (y = 0)
+  const [topZ1, setTopZ1] = useState(-0.6);             // z-depth of top segment control point
+  const [topZ2, setTopZ2] = useState(-0.3);             // z-depth at top edge (y = +mirrorHalfHeight)
+  
   const [controlY1Ratio, setControlY1Ratio] = useState(0.0); // y₁ position as ratio (-1 to 1, where 0 = center)
   
   const [mirrorDist, setMirrorDist] = useState(2.0);  // distance from camera
@@ -224,44 +229,55 @@ export default function SimpleWebcam() {
     
     if (!gl || !texture || !video || !rayTracedGl || !rayTracedCanvas) return;
 
-    // Convert Bézier control points to polynomial coefficients
+    // Convert Bézier control points to polynomial coefficients for piecewise curve
     const createSegmentsFromControlPoints = () => {
-      // For a single quadratic Bézier segment from yMin to yMax
-      const yMin = -mirrorHalfHeight;
-      const yMax = mirrorHalfHeight;
-      const yRange = yMax - yMin;
+      const segments = [];
       
-      // Control points in y-space:
-      // P₀ = (yMin, z₀) - bottom edge
-      // P₁ = (center, z₁) - middle control point (at y=0 for center)
-      // P₂ = (yMax, z₂) - top edge
+      // Helper function to convert a single Bezier segment to polynomial coefficients
+      const bezierToPolynomial = (yMin, yMax, z0, z1, z2) => {
+        const yRange = yMax - yMin;
+        
+        if (yRange === 0.0) {
+          return { a: 0, b: 0, c: z0, yMin };
+        }
+        
+        // Quadratic Bézier parametric form: B(t) = (1-t)²·P₀ + 2(1-t)t·P₁ + t²·P₂, t ∈ [0,1]
+        // where t = (y - yMin) / yRange
+        
+        // Bézier coefficients in t-space:
+        // z(t) = a_t·t² + b_t·t + c_t
+        const a_t = z0 - 2.0 * z1 + z2;
+        const b_t = 2.0 * (z1 - z0);
+        const c_t = z0;
+        
+        // Convert to polynomial in y-space: z(y) = a·y² + b·y + c
+        // by substituting t = (y - yMin) / yRange and expanding
+        const a = a_t / (yRange * yRange);
+        const b = b_t / yRange - 2.0 * a_t * yMin / (yRange * yRange);
+        const c = c_t + a_t * yMin * yMin / (yRange * yRange) - b_t * yMin / yRange;
+        
+        return { a, b, c, yMin };
+      };
       
-      // Quadratic Bézier parametric form: B(t) = (1-t)²·P₀ + 2(1-t)t·P₁ + t²·P₂, t ∈ [0,1]
-      // where t = (y - yMin) / yRange
+      // Bottom segment: y ∈ [-mirrorHalfHeight, 0]
+      segments.push(bezierToPolynomial(
+        -mirrorHalfHeight,  // yMin
+        0,                  // yMax
+        bottomZ0,           // z at bottom edge
+        bottomZ1,           // z at bottom control point
+        bottomZ2            // z at center
+      ));
       
-      // Bézier coefficients in t-space:
-      // z(t) = a_t·t² + b_t·t + c_t
-      const z0 = controlZ0;
-      const z1 = controlZ1;
-      const z2 = controlZ2;
+      // Top segment: y ∈ [0, +mirrorHalfHeight]
+      segments.push(bezierToPolynomial(
+        0,                  // yMin (center)
+        mirrorHalfHeight,   // yMax
+        topZ0,              // z at center
+        topZ1,              // z at top control point
+        topZ2               // z at top edge
+      ));
       
-      const a_t = z0 - 2.0 * z1 + z2;
-      const b_t = 2.0 * (z1 - z0);
-      const c_t = z0;
-      
-      // Convert to polynomial in y-space: z(y) = a·y² + b·y + c
-      // by substituting t = (y - yMin) / yRange and expanding
-      if (yRange === 0.0) {
-        return [{ a: 0, b: 0, c: z0, yMin }];
-      }
-      
-      const a = a_t / (yRange * yRange);
-      const b = b_t / yRange - 2.0 * a_t * yMin / (yRange * yRange);
-      const c = c_t + a_t * yMin * yMin / (yRange * yRange) - b_t * yMin / yRange;
-      
-      return [
-        { a, b, c, yMin }
-      ];
+      return segments;
     };
 
     let frameCount = 0;
@@ -396,7 +412,7 @@ export default function SimpleWebcam() {
         cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [isActive, controlZ0, controlZ1, controlZ2, controlY1Ratio, mirrorDist, mirrorRadius, mirrorHalfWidth, mirrorHalfHeight, imagePlaneDist, imageSizeX, imageSizeY, fov]);
+  }, [isActive, bottomZ0, bottomZ1, bottomZ2, topZ0, topZ1, topZ2, controlY1Ratio, mirrorDist, mirrorRadius, mirrorHalfWidth, mirrorHalfHeight, imagePlaneDist, imageSizeX, imageSizeY, fov]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px' }}>
@@ -431,10 +447,12 @@ export default function SimpleWebcam() {
       </div>
       
       <MirrorVisualization
-        controlZ0={controlZ0}
-        controlZ1={controlZ1}
-        controlZ2={controlZ2}
-        controlY1Ratio={controlY1Ratio}
+        bottomZ0={bottomZ0}
+        bottomZ1={bottomZ1}
+        bottomZ2={bottomZ2}
+        topZ0={topZ0}
+        topZ1={topZ1}
+        topZ2={topZ2}
         mirrorDist={mirrorDist}
         mirrorHalfHeight={mirrorHalfHeight}
         imagePlaneDist={imagePlaneDist}
@@ -448,62 +466,129 @@ export default function SimpleWebcam() {
       </div>
 
       <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-        <h3>Mirror Curve Controls</h3>
+        <h3>Piecewise Mirror Curve Controls</h3>
         <p style={{ color: '#666', marginBottom: '20px' }}>
-          Adjust the distance from camera (Z-axis) for each control point of the curved mirror
+          The mirror is split into two segments (bottom and top), each with its own quadratic Bezier curve
         </p>
         
+        {/* Top Segment Controls */}
         <div style={{ 
-          backgroundColor: '#f5f5f5', 
+          backgroundColor: '#e8f4f8', 
           padding: '20px', 
           borderRadius: '8px',
-          marginBottom: '20px'
+          marginBottom: '15px',
+          border: '2px solid #4a90e2'
         }}>
-          <h4 style={{ marginTop: 0 }}>Control Point Distances from Camera</h4>
+          <h4 style={{ marginTop: 0, color: '#2c5aa0' }}>Top Segment (y = 0 to +{mirrorHalfHeight.toFixed(1)})</h4>
           
-          <div style={{ marginBottom: '20px' }}>
+          <div style={{ marginBottom: '15px' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
-              Top Control Point (Distance from Camera): {controlZ2.toFixed(3)}
+              Top Edge Point (Distance from Camera): {topZ2.toFixed(3)}
             </label>
             <input 
               type="range" 
               min="-1.0" 
               max="1.0" 
               step="0.01" 
-              value={controlZ2}
-              onChange={(e) => setControlZ2(parseFloat(e.target.value))}
+              value={topZ2}
+              onChange={(e) => setTopZ2(parseFloat(e.target.value))}
               style={{ width: '100%' }}
             />
             <small style={{ color: '#666' }}>Negative = closer to camera, Positive = further away</small>
           </div>
 
-          <div style={{ marginBottom: '20px' }}>
+          <div style={{ marginBottom: '15px' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
-              Middle Control Point (Distance from Camera): {controlZ1.toFixed(3)}
+              Top Segment Control Point (Distance from Camera): {topZ1.toFixed(3)}
             </label>
             <input 
               type="range" 
               min="-1.0" 
               max="1.0" 
               step="0.01" 
-              value={controlZ1}
-              onChange={(e) => setControlZ1(parseFloat(e.target.value))}
+              value={topZ1}
+              onChange={(e) => setTopZ1(parseFloat(e.target.value))}
               style={{ width: '100%' }}
             />
-            <small style={{ color: '#666' }}>Negative = closer to camera, Positive = further away</small>
+            <small style={{ color: '#666' }}>Controls the curvature of the top segment</small>
           </div>
 
           <div style={{ marginBottom: '0' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
-              Bottom Control Point (Distance from Camera): {controlZ0.toFixed(3)}
+              Center Point (Distance from Camera): {topZ0.toFixed(3)}
             </label>
             <input 
               type="range" 
               min="-1.0" 
               max="1.0" 
               step="0.01" 
-              value={controlZ0}
-              onChange={(e) => setControlZ0(parseFloat(e.target.value))}
+              value={topZ0}
+              onChange={(e) => {
+                setTopZ0(parseFloat(e.target.value));
+                setBottomZ2(parseFloat(e.target.value)); // Keep center continuous
+              }}
+              style={{ width: '100%' }}
+            />
+            <small style={{ color: '#666' }}>Shared between top and bottom segments (y = 0)</small>
+          </div>
+        </div>
+
+        {/* Bottom Segment Controls */}
+        <div style={{ 
+          backgroundColor: '#f8e8e8', 
+          padding: '20px', 
+          borderRadius: '8px',
+          marginBottom: '20px',
+          border: '2px solid #e24a4a'
+        }}>
+          <h4 style={{ marginTop: 0, color: '#a02c2c' }}>Bottom Segment (y = -{mirrorHalfHeight.toFixed(1)} to 0)</h4>
+          
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Center Point (Distance from Camera): {bottomZ2.toFixed(3)}
+            </label>
+            <input 
+              type="range" 
+              min="-1.0" 
+              max="1.0" 
+              step="0.01" 
+              value={bottomZ2}
+              onChange={(e) => {
+                setBottomZ2(parseFloat(e.target.value));
+                setTopZ0(parseFloat(e.target.value)); // Keep center continuous
+              }}
+              style={{ width: '100%' }}
+            />
+            <small style={{ color: '#666' }}>Shared between top and bottom segments (y = 0)</small>
+          </div>
+
+          <div style={{ marginBottom: '15px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Bottom Segment Control Point (Distance from Camera): {bottomZ1.toFixed(3)}
+            </label>
+            <input 
+              type="range" 
+              min="-1.0" 
+              max="1.0" 
+              step="0.01" 
+              value={bottomZ1}
+              onChange={(e) => setBottomZ1(parseFloat(e.target.value))}
+              style={{ width: '100%' }}
+            />
+            <small style={{ color: '#666' }}>Controls the curvature of the bottom segment</small>
+          </div>
+
+          <div style={{ marginBottom: '0' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Bottom Edge Point (Distance from Camera): {bottomZ0.toFixed(3)}
+            </label>
+            <input 
+              type="range" 
+              min="-1.0" 
+              max="1.0" 
+              step="0.01" 
+              value={bottomZ0}
+              onChange={(e) => setBottomZ0(parseFloat(e.target.value))}
               style={{ width: '100%' }}
             />
             <small style={{ color: '#666' }}>Negative = closer to camera, Positive = further away</small>
@@ -559,6 +644,22 @@ export default function SimpleWebcam() {
                 onChange={(e) => setMirrorHalfHeight(parseFloat(e.target.value))}
                 style={{ width: '100%' }}
               />
+            </div>
+
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '5px' }}>
+                Field of View (FOV): {(fov * 180 / Math.PI).toFixed(1)}°
+              </label>
+              <input 
+                type="range" 
+                min={Math.PI / 6} 
+                max={2 * Math.PI / 3} 
+                step="0.01" 
+                value={fov}
+                onChange={(e) => setFov(parseFloat(e.target.value))}
+                style={{ width: '100%' }}
+              />
+              <small style={{ color: '#666' }}>Range: 30° to 120°</small>
             </div>
           </div>
         </details>

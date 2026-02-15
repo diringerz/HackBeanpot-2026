@@ -1,10 +1,12 @@
 import React, { useRef, useEffect } from 'react';
 
 export default function MirrorVisualization({
-  controlZ0,
-  controlZ1,
-  controlZ2,
-  controlY1Ratio,
+  bottomZ0,
+  bottomZ1,
+  bottomZ2,
+  topZ0,
+  topZ1,
+  topZ2,
   mirrorDist,
   mirrorHalfHeight,
   imagePlaneDist,
@@ -133,29 +135,43 @@ export default function MirrorVisualization({
     );
     ctx.stroke();
 
-    // Calculate mirror curve using Bézier parameterization
-    const yMin = -mirrorHalfHeight;
-    const yMax = mirrorHalfHeight;
-    const yRange = yMax - yMin;
+    // Calculate mirror curve using piecewise Bézier parameterization
+    // Helper function to convert Bezier segment to polynomial coefficients
+    const bezierToPolynomial = (yMin, yMax, z0, z1, z2) => {
+      const yRange = yMax - yMin;
+      
+      if (yRange === 0) {
+        return { a: 0, b: 0, c: z0 };
+      }
+      
+      // Bézier coefficients in t-space
+      const a_t = z0 - 2.0 * z1 + z2;
+      const b_t = 2.0 * (z1 - z0);
+      const c_t = z0;
+      
+      // Convert to polynomial in y-space: z(y) = a·y² + b·y + c
+      const a = a_t / (yRange * yRange);
+      const b = b_t / yRange - 2.0 * a_t * yMin / (yRange * yRange);
+      const c = c_t + a_t * yMin * yMin / (yRange * yRange) - b_t * yMin / yRange;
+      
+      return { a, b, c };
+    };
     
-    const z0 = controlZ0;
-    const z1 = controlZ1;
-    const z2 = controlZ2;
+    // Bottom segment: y ∈ [-mirrorHalfHeight, 0]
+    const bottomSegment = bezierToPolynomial(-mirrorHalfHeight, 0, bottomZ0, bottomZ1, bottomZ2);
     
-    // Bézier coefficients in t-space
-    const a_t = z0 - 2.0 * z1 + z2;
-    const b_t = 2.0 * (z1 - z0);
-    const c_t = z0;
-    
-    // Convert to polynomial in y-space: z(y) = a·y² + b·y + c
-    const a = yRange > 0 ? a_t / (yRange * yRange) : 0;
-    const b = yRange > 0 ? (b_t / yRange - 2.0 * a_t * yMin / (yRange * yRange)) : 0;
-    const c = yRange > 0 ? (c_t + a_t * yMin * yMin / (yRange * yRange) - b_t * yMin / yRange) : z0;
+    // Top segment: y ∈ [0, +mirrorHalfHeight]
+    const topSegment = bezierToPolynomial(0, mirrorHalfHeight, topZ0, topZ1, topZ2);
 
-    // Function to compute z-depth from y-coordinate
+    // Function to compute z-depth from y-coordinate (piecewise)
     const getMirrorZ = (y) => {
-      // Evaluate polynomial: z(y) = a·y² + b·y + c
-      return a * y * y + b * y + c + mirrorDist;
+      if (y < 0) {
+        // Bottom segment
+        return bottomSegment.a * y * y + bottomSegment.b * y + bottomSegment.c + mirrorDist;
+      } else {
+        // Top segment
+        return topSegment.a * y * y + topSegment.b * y + topSegment.c + mirrorDist;
+      }
     };
 
     // Draw mirror curve
@@ -180,7 +196,7 @@ export default function MirrorVisualization({
 
     ctx.fillStyle = '#FF9800';
     ctx.font = '12px monospace';
-    const mirrorLabel = toCanvas(mirrorDist + controlZ0, mirrorHalfHeight + 0.3);
+    const mirrorLabel = toCanvas(mirrorDist + bottomZ0, mirrorHalfHeight + 0.3);
     ctx.fillText('Mirror', mirrorLabel.x - 10, mirrorLabel.y);
 
     // Draw Bézier control points
@@ -204,25 +220,39 @@ export default function MirrorVisualization({
       ctx.fillText(label, pos.x + 12, pos.y + 4);
     };
 
-    // P0 (bottom edge)
-    drawControlPoint(yMin, z0, 'P₀', '#FFD700');
-    // P1 (middle control - can be anywhere in y-space)
-    const y1 = yMin + (0.5 + controlY1Ratio * 0.5) * yRange;
-    drawControlPoint(y1, z1, 'P₁', '#FF6B6B');
-    // P2 (top edge)
-    drawControlPoint(yMax, z2, 'P₂', '#FFD700');
+    // Bottom segment control points
+    drawControlPoint(-mirrorHalfHeight, bottomZ0, 'P₀ (bottom)', '#FFD700');
+    drawControlPoint(-mirrorHalfHeight / 2, bottomZ1, 'P₁ (bottom)', '#FF6B6B');
+    drawControlPoint(0, bottomZ2, 'P₂ (center)', '#4CAF50');
+    
+    // Top segment control points
+    drawControlPoint(0, topZ0, 'P₀ (center)', '#4CAF50');
+    drawControlPoint(mirrorHalfHeight / 2, topZ1, 'P₁ (top)', '#6B9FFF');
+    drawControlPoint(mirrorHalfHeight, topZ2, 'P₂ (top)', '#FFD700');
 
-    // Draw control polygon
-    ctx.strokeStyle = '#FFD70060';
+    // Draw control polygons
+    // Bottom segment control polygon
+    ctx.strokeStyle = '#FF6B6B60';
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
     ctx.beginPath();
-    const p0 = toCanvas(z0 + mirrorDist, yMin);
-    const p1 = toCanvas(z1 + mirrorDist, y1);
-    const p2 = toCanvas(z2 + mirrorDist, yMax);
-    ctx.moveTo(p0.x, p0.y);
-    ctx.lineTo(p1.x, p1.y);
-    ctx.lineTo(p2.x, p2.y);
+    const bottomP0 = toCanvas(bottomZ0 + mirrorDist, -mirrorHalfHeight);
+    const bottomP1 = toCanvas(bottomZ1 + mirrorDist, -mirrorHalfHeight / 2);
+    const bottomP2 = toCanvas(bottomZ2 + mirrorDist, 0);
+    ctx.moveTo(bottomP0.x, bottomP0.y);
+    ctx.lineTo(bottomP1.x, bottomP1.y);
+    ctx.lineTo(bottomP2.x, bottomP2.y);
+    ctx.stroke();
+    
+    // Top segment control polygon
+    ctx.strokeStyle = '#6B9FFF60';
+    ctx.beginPath();
+    const topP0 = toCanvas(topZ0 + mirrorDist, 0);
+    const topP1 = toCanvas(topZ1 + mirrorDist, mirrorHalfHeight / 2);
+    const topP2 = toCanvas(topZ2 + mirrorDist, mirrorHalfHeight);
+    ctx.moveTo(topP0.x, topP0.y);
+    ctx.lineTo(topP1.x, topP1.y);
+    ctx.lineTo(topP2.x, topP2.y);
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -240,7 +270,7 @@ export default function MirrorVisualization({
     ctx.stroke();
     ctx.fillText(`${mirrorDist.toFixed(2)}`, (originX + toCanvas(mirrorDist, 0).x) / 2 - 15, annotY - 5);
 
-  }, [controlZ0, controlZ1, controlZ2, controlY1Ratio, mirrorDist, mirrorHalfHeight, imagePlaneDist, imageSizeY, videoRef]);
+  }, [bottomZ0, bottomZ1, bottomZ2, topZ0, topZ1, topZ2, mirrorDist, mirrorHalfHeight, imagePlaneDist, imageSizeY, videoRef]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -252,8 +282,8 @@ export default function MirrorVisualization({
         style={{ border: '2px solid #ccc', borderRadius: '8px', backgroundColor: '#1a1a1a' }}
       />
       <div style={{ marginTop: '10px', fontSize: '11px', color: '#999', textAlign: 'center' }}>
-        <div>Camera (blue) at origin • Image plane (green) behind camera • Mirror (orange) curve</div>
-        <div>Control points: P₀ (bottom), P₁ (middle), P₂ (top) — full asymmetric cross-section</div>
+        <div>Camera (blue) at origin • Image plane (green) behind camera • Mirror (orange) piecewise curve</div>
+        <div>Control points: Bottom segment (red) • Center (green) • Top segment (blue) — piecewise quadratic Bézier</div>
       </div>
     </div>
   );
