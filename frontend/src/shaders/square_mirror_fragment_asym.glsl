@@ -80,6 +80,43 @@ uniform vec2  u_imageSize;
 
 uniform float u_fov;
 
+// Distance to background plane (behind camera and webcam feed)
+#define BACKGROUND_PLANE_DIST 5.0
+
+// ============================================================================
+// BACKGROUND PLANE GRADIENT
+// ============================================================================
+
+vec3 getBackgroundColor(vec3 hitPoint) {
+    // Create a gradient based on position on the background plane
+    // Use Y and X coordinates to create an interesting gradient
+    
+    // Normalize coordinates to create smooth gradients
+    float x = hitPoint.x * 0.15;
+    float y = hitPoint.y * 0.15;
+    
+    // Create a multi-color gradient
+    vec3 color1 = vec3(0.1, 0.05, 0.2);  // Deep purple
+    vec3 color2 = vec3(0.05, 0.15, 0.3); // Deep blue
+    vec3 color3 = vec3(0.15, 0.08, 0.25); // Purple-pink
+    
+    // Mix based on position
+    float mixFactor1 = sin(x * 1.5) * 0.5 + 0.5;
+    float mixFactor2 = cos(y * 1.5) * 0.5 + 0.5;
+    
+    vec3 mixedColor = mix(
+        mix(color1, color2, mixFactor1),
+        color3,
+        mixFactor2
+    );
+    
+    // Add some radial falloff from center
+    float dist = length(vec2(x, y));
+    float vignette = 1.0 - smoothstep(0.0, 3.0, dist);
+    mixedColor *= (0.5 + 0.5 * vignette);
+    
+    return mixedColor;
+}
 
 // ============================================================================
 // PER-SEGMENT INTERSECTION — Quadratic
@@ -410,6 +447,22 @@ void main() {
     #endif
 
     if (imgUV.x < 0.0 || imgUV.x > 1.0 || imgUV.y < 0.0 || imgUV.y > 1.0) {
+        // Ray missed the camera feed - check if it hits the background plane
+        // Background plane is at z = -u_imagePlaneDist - BACKGROUND_PLANE_DIST
+        float backPlaneZ = -u_imagePlaneDist - BACKGROUND_PLANE_DIST;
+        
+        // Calculate intersection with background plane
+        if (reflDir.z < 0.0) {
+            float tBack = (backPlaneZ - hitPos.z) / reflDir.z;
+            if (tBack > 0.0) {
+                vec3 backHit = hitPos + reflDir * tBack;
+                vec3 bgColor = getBackgroundColor(backHit);
+                gl_FragColor = vec4(bgColor, 1.0);
+                return;
+            }
+        }
+        
+        // If we don't hit the background plane, return dark color
         gl_FragColor = vec4(0.02, 0.02, 0.03, 1.0);
         return;
     }

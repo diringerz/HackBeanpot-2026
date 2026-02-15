@@ -1,12 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 
 export default function MirrorVisualization({
-  bottomZ0,
-  bottomZ1,
-  bottomZ2,
-  topZ0,
-  topZ1,
-  topZ2,
+  curveSegments, // Array of { yMin, yMax, z0, z1, z2 }
   mirrorDist,
   mirrorHalfHeight,
   imagePlaneDist,
@@ -141,7 +136,7 @@ export default function MirrorVisualization({
       const yRange = yMax - yMin;
       
       if (yRange === 0) {
-        return { a: 0, b: 0, c: z0 };
+        return { a: 0, b: 0, c: z0, yMin, yMax };
       }
       
       // Bézier coefficients in t-space
@@ -154,24 +149,25 @@ export default function MirrorVisualization({
       const b = b_t / yRange - 2.0 * a_t * yMin / (yRange * yRange);
       const c = c_t + a_t * yMin * yMin / (yRange * yRange) - b_t * yMin / yRange;
       
-      return { a, b, c };
+      return { a, b, c, yMin, yMax };
     };
     
-    // Bottom segment: y ∈ [-mirrorHalfHeight, 0]
-    const bottomSegment = bezierToPolynomial(-mirrorHalfHeight, 0, bottomZ0, bottomZ1, bottomZ2);
-    
-    // Top segment: y ∈ [0, +mirrorHalfHeight]
-    const topSegment = bezierToPolynomial(0, mirrorHalfHeight, topZ0, topZ1, topZ2);
+    // Convert all curve segments to polynomial form
+    const segments = curveSegments.map(seg => 
+      bezierToPolynomial(seg.yMin, seg.yMax, seg.z0, seg.z1, seg.z2)
+    );
 
     // Function to compute z-depth from y-coordinate (piecewise)
     const getMirrorZ = (y) => {
-      if (y < 0) {
-        // Bottom segment
-        return bottomSegment.a * y * y + bottomSegment.b * y + bottomSegment.c + mirrorDist;
-      } else {
-        // Top segment
-        return topSegment.a * y * y + topSegment.b * y + topSegment.c + mirrorDist;
+      // Find which segment this y belongs to
+      for (const seg of segments) {
+        if (y >= seg.yMin && y <= seg.yMax) {
+          return seg.a * y * y + seg.b * y + seg.c + mirrorDist;
+        }
       }
+      // Fallback to first segment
+      const seg = segments[0];
+      return seg.a * y * y + seg.b * y + seg.c + mirrorDist;
     };
 
     // Draw mirror curve
@@ -196,7 +192,7 @@ export default function MirrorVisualization({
 
     ctx.fillStyle = '#FF9800';
     ctx.font = '12px monospace';
-    const mirrorLabel = toCanvas(mirrorDist + bottomZ0, mirrorHalfHeight + 0.3);
+    const mirrorLabel = toCanvas(mirrorDist + curveSegments[0].z0, mirrorHalfHeight + 0.3);
     ctx.fillText('Mirror', mirrorLabel.x - 10, mirrorLabel.y);
 
     // Draw Bézier control points
@@ -220,40 +216,32 @@ export default function MirrorVisualization({
       ctx.fillText(label, pos.x + 12, pos.y + 4);
     };
 
-    // Bottom segment control points
-    drawControlPoint(-mirrorHalfHeight, bottomZ0, 'P₀ (bottom)', '#FFD700');
-    drawControlPoint(-mirrorHalfHeight / 2, bottomZ1, 'P₁ (bottom)', '#FF6B6B');
-    drawControlPoint(0, bottomZ2, 'P₂ (center)', '#4CAF50');
+    // Colors for different segments
+    const segmentColors = ['#FF6B6B', '#6B9FFF', '#FFB86B', '#9F6BFF', '#6BFFB8'];
     
-    // Top segment control points
-    drawControlPoint(0, topZ0, 'P₀ (center)', '#4CAF50');
-    drawControlPoint(mirrorHalfHeight / 2, topZ1, 'P₁ (top)', '#6B9FFF');
-    drawControlPoint(mirrorHalfHeight, topZ2, 'P₂ (top)', '#FFD700');
-
-    // Draw control polygons
-    // Bottom segment control polygon
-    ctx.strokeStyle = '#FF6B6B60';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    const bottomP0 = toCanvas(bottomZ0 + mirrorDist, -mirrorHalfHeight);
-    const bottomP1 = toCanvas(bottomZ1 + mirrorDist, -mirrorHalfHeight / 2);
-    const bottomP2 = toCanvas(bottomZ2 + mirrorDist, 0);
-    ctx.moveTo(bottomP0.x, bottomP0.y);
-    ctx.lineTo(bottomP1.x, bottomP1.y);
-    ctx.lineTo(bottomP2.x, bottomP2.y);
-    ctx.stroke();
-    
-    // Top segment control polygon
-    ctx.strokeStyle = '#6B9FFF60';
-    ctx.beginPath();
-    const topP0 = toCanvas(topZ0 + mirrorDist, 0);
-    const topP1 = toCanvas(topZ1 + mirrorDist, mirrorHalfHeight / 2);
-    const topP2 = toCanvas(topZ2 + mirrorDist, mirrorHalfHeight);
-    ctx.moveTo(topP0.x, topP0.y);
-    ctx.lineTo(topP1.x, topP1.y);
-    ctx.lineTo(topP2.x, topP2.y);
-    ctx.stroke();
+    // Draw control points and polygons for all segments
+    curveSegments.forEach((seg, idx) => {
+      const color = segmentColors[idx % segmentColors.length];
+      const yMid = (seg.yMin + seg.yMax) / 2;
+      
+      // Draw control points
+      drawControlPoint(seg.yMin, seg.z0, `P₀ [${idx}]`, '#FFD700');
+      drawControlPoint(yMid, seg.z1, `P₁ [${idx}]`, color);
+      drawControlPoint(seg.yMax, seg.z2, `P₂ [${idx}]`, seg.yMax === mirrorHalfHeight || seg.yMax === 0 ? '#4CAF50' : '#FFD700');
+      
+      // Draw control polygon
+      ctx.strokeStyle = color + '60';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      const p0 = toCanvas(seg.z0 + mirrorDist, seg.yMin);
+      const p1 = toCanvas(seg.z1 + mirrorDist, yMid);
+      const p2 = toCanvas(seg.z2 + mirrorDist, seg.yMax);
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    });
     ctx.setLineDash([]);
 
     // Draw distance annotations
@@ -270,7 +258,7 @@ export default function MirrorVisualization({
     ctx.stroke();
     ctx.fillText(`${mirrorDist.toFixed(2)}`, (originX + toCanvas(mirrorDist, 0).x) / 2 - 15, annotY - 5);
 
-  }, [bottomZ0, bottomZ1, bottomZ2, topZ0, topZ1, topZ2, mirrorDist, mirrorHalfHeight, imagePlaneDist, imageSizeY, videoRef]);
+  }, [curveSegments, mirrorDist, mirrorHalfHeight, imagePlaneDist, imageSizeY, videoRef]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -283,7 +271,7 @@ export default function MirrorVisualization({
       />
       <div style={{ marginTop: '10px', fontSize: '11px', color: '#999', textAlign: 'center' }}>
         <div>Camera (blue) at origin • Image plane (green) behind camera • Mirror (orange) piecewise curve</div>
-        <div>Control points: Bottom segment (red) • Center (green) • Top segment (blue) — piecewise quadratic Bézier</div>
+        <div>{curveSegments.length} segment{curveSegments.length !== 1 ? 's' : ''} — piecewise quadratic Bézier curves</div>
       </div>
     </div>
   );

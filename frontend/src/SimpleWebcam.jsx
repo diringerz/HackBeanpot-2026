@@ -1,18 +1,13 @@
 import React, { useRef, useState, useEffect } from 'react';
-import vertexShaderSource from './shaders/curved_mirror_vertex.glsl?raw';
-import fragmentShaderSource from './shaders/square_mirror_fragment_asym.glsl?raw';
 import MirrorVisualization from './MirrorVisualization';
+import RayTracedMirror from './RayTracedMirror';
 
 export default function SimpleWebcam() {
   const videoRef = useRef(null);
   const glCanvasRef = useRef(null);
-  const rayTracedCanvasRef = useRef(null);
   const [isActive, setIsActive] = useState(false);
   const glRef = useRef(null);
-  const rayTracedGlRef = useRef(null);
   const textureRef = useRef(null);
-  const rayTracedTextureRef = useRef(null);
-  const shaderProgramRef = useRef(null);
 
   // Mirror parameters (state)
   // Piecewise Quadratic Bézier control points in y-space
@@ -27,15 +22,13 @@ export default function SimpleWebcam() {
   const [topZ1, setTopZ1] = useState(-0.6);             // z-depth of top segment control point
   const [topZ2, setTopZ2] = useState(-0.3);             // z-depth at top edge (y = +mirrorHalfHeight)
   
-  const [controlY1Ratio, setControlY1Ratio] = useState(0.0); // y₁ position as ratio (-1 to 1, where 0 = center)
-  
   const [mirrorDist, setMirrorDist] = useState(2.0);  // distance from camera
   const [mirrorRadius, setMirrorRadius] = useState(1.5); // mirror radius (used for display)
   const [mirrorHalfWidth, setMirrorHalfWidth] = useState(2.0); // rectangular mirror half-width
   const [mirrorHalfHeight, setMirrorHalfHeight] = useState(1.5); // rectangular mirror half-height
   const [imagePlaneDist, setImagePlaneDist] = useState(0.5); // image plane distance
-  const [imageSizeX, setImageSizeX] = useState(1.6);  // image size X
-  const [imageSizeY, setImageSizeY] = useState(1.2);  // image size Y
+  const [imageSizeX, setImageSizeX] = useState(8.0);  // image size X (5x larger)
+  const [imageSizeY, setImageSizeY] = useState(6.0);  // image size Y (5x larger)
   const [fov, setFov] = useState(Math.PI / 3.0);      // field of view (60 degrees)
 
   useEffect(() => {
@@ -115,83 +108,6 @@ export default function SimpleWebcam() {
     console.log('WebGL initialized for original feed');
   }, []);
 
-  // Initialize ray-traced canvas
-  useEffect(() => {
-    const canvas = rayTracedCanvasRef.current;
-    if (!canvas) return;
-
-    const gl = canvas.getContext('webgl2', {
-      alpha: false,
-      antialias: false,
-      preserveDrawingBuffer: false,
-      powerPreference: 'high-performance'
-    });
-
-    if (!gl) {
-      console.error('WebGL not supported for ray-traced output');
-      return;
-    }
-
-    rayTracedGlRef.current = gl;
-
-    // Create texture to hold the webcam input for ray tracing
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    rayTracedTextureRef.current = texture;
-
-    // Compile shaders
-    const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vertexShader, vertexShaderSource);
-    gl.compileShader(vertexShader);
-    
-    if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-      console.error('Vertex shader compilation error:', gl.getShaderInfoLog(vertexShader));
-      return;
-    }
-
-    const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fragmentShader, fragmentShaderSource);
-    gl.compileShader(fragmentShader);
-    
-    if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-      console.error('Fragment shader compilation error:', gl.getShaderInfoLog(fragmentShader));
-      console.error('Fragment shader source length:', fragmentShaderSource.length);
-      return;
-    }
-
-    // Create program
-    const program = gl.createProgram();
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error('Shader program link error:', gl.getProgramInfoLog(program));
-      return;
-    }
-
-    shaderProgramRef.current = program;
-
-    // Create fullscreen quad buffer
-    const positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    const positions = new Float32Array([
-      -1, -1,
-       1, -1,
-      -1,  1,
-       1,  1,
-    ]);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-
-    gl.positionBuffer = positionBuffer;
-
-    console.log('WebGL initialized for ray-traced feed');
-  }, []);
-
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -224,61 +140,8 @@ export default function SimpleWebcam() {
     const gl = glRef.current;
     const texture = textureRef.current;
     const glCanvas = glCanvasRef.current;
-    const rayTracedGl = rayTracedGlRef.current;
-    const rayTracedCanvas = rayTracedCanvasRef.current;
     
-    if (!gl || !texture || !video || !rayTracedGl || !rayTracedCanvas) return;
-
-    // Convert Bézier control points to polynomial coefficients for piecewise curve
-    const createSegmentsFromControlPoints = () => {
-      const segments = [];
-      
-      // Helper function to convert a single Bezier segment to polynomial coefficients
-      const bezierToPolynomial = (yMin, yMax, z0, z1, z2) => {
-        const yRange = yMax - yMin;
-        
-        if (yRange === 0.0) {
-          return { a: 0, b: 0, c: z0, yMin };
-        }
-        
-        // Quadratic Bézier parametric form: B(t) = (1-t)²·P₀ + 2(1-t)t·P₁ + t²·P₂, t ∈ [0,1]
-        // where t = (y - yMin) / yRange
-        
-        // Bézier coefficients in t-space:
-        // z(t) = a_t·t² + b_t·t + c_t
-        const a_t = z0 - 2.0 * z1 + z2;
-        const b_t = 2.0 * (z1 - z0);
-        const c_t = z0;
-        
-        // Convert to polynomial in y-space: z(y) = a·y² + b·y + c
-        // by substituting t = (y - yMin) / yRange and expanding
-        const a = a_t / (yRange * yRange);
-        const b = b_t / yRange - 2.0 * a_t * yMin / (yRange * yRange);
-        const c = c_t + a_t * yMin * yMin / (yRange * yRange) - b_t * yMin / yRange;
-        
-        return { a, b, c, yMin };
-      };
-      
-      // Bottom segment: y ∈ [-mirrorHalfHeight, 0]
-      segments.push(bezierToPolynomial(
-        -mirrorHalfHeight,  // yMin
-        0,                  // yMax
-        bottomZ0,           // z at bottom edge
-        bottomZ1,           // z at bottom control point
-        bottomZ2            // z at center
-      ));
-      
-      // Top segment: y ∈ [0, +mirrorHalfHeight]
-      segments.push(bezierToPolynomial(
-        0,                  // yMin (center)
-        mirrorHalfHeight,   // yMax
-        topZ0,              // z at center
-        topZ1,              // z at top control point
-        topZ2               // z at top edge
-      ));
-      
-      return segments;
-    };
+    if (!gl || !texture || !video) return;
 
     let frameCount = 0;
     let lastTime = performance.now();
@@ -295,13 +158,6 @@ export default function SimpleWebcam() {
         glCanvas.width = video.videoWidth;
         glCanvas.height = video.videoHeight;
         gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-      }
-
-      // Only resize ray-traced canvas if dimensions changed
-      if (rayTracedCanvas.width !== video.videoWidth || rayTracedCanvas.height !== video.videoHeight) {
-        rayTracedCanvas.width = video.videoWidth;
-        rayTracedCanvas.height = video.videoHeight;
-        rayTracedGl.viewport(0, 0, rayTracedCanvas.width, rayTracedCanvas.height);
       }
 
       // Upload frame to original texture
@@ -327,72 +183,6 @@ export default function SimpleWebcam() {
       
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-      // Render ray-traced output
-      const rayTracedTexture = rayTracedTextureRef.current;
-      const program = shaderProgramRef.current;
-      
-      if (program && rayTracedTexture) {
-        // Upload webcam frame to ray-traced texture
-        rayTracedGl.bindTexture(rayTracedGl.TEXTURE_2D, rayTracedTexture);
-        rayTracedGl.texImage2D(rayTracedGl.TEXTURE_2D, 0, rayTracedGl.RGBA, rayTracedGl.RGBA, rayTracedGl.UNSIGNED_BYTE, video);
-
-        rayTracedGl.useProgram(program);
-        
-        // Set up vertex attributes
-        rayTracedGl.bindBuffer(rayTracedGl.ARRAY_BUFFER, rayTracedGl.positionBuffer);
-        const aPosition = rayTracedGl.getAttribLocation(program, 'a_position');
-        rayTracedGl.enableVertexAttribArray(aPosition);
-        rayTracedGl.vertexAttribPointer(aPosition, 2, rayTracedGl.FLOAT, false, 0, 0);
-        
-        // Set uniforms
-        const resolutionLoc = rayTracedGl.getUniformLocation(program, 'u_resolution');
-        if (resolutionLoc) {
-          rayTracedGl.uniform2f(resolutionLoc, rayTracedCanvas.width, rayTracedCanvas.height);
-        }
-        
-        // Set up bezier curve segments from control points
-        const segments = createSegmentsFromControlPoints();
-        const segmentData = new Float32Array(16 * 4); // MAX_SEGMENTS = 16, vec4 per segment
-        for (let i = 0; i < segments.length; i++) {
-          segmentData[i * 4 + 0] = segments[i].a;
-          segmentData[i * 4 + 1] = segments[i].b;
-          segmentData[i * 4 + 2] = segments[i].c;
-          segmentData[i * 4 + 3] = segments[i].yMin;
-        }
-        
-        // Upload segments as uniform array
-        // Note: segment.w is now yMin instead of sMin
-        for (let i = 0; i < 16; i++) {
-          const loc = rayTracedGl.getUniformLocation(program, `u_segments[${i}]`);
-          if (loc !== null) {
-            rayTracedGl.uniform4f(loc, 
-              segmentData[i * 4 + 0],  // a
-              segmentData[i * 4 + 1],  // b
-              segmentData[i * 4 + 2],  // c
-              segmentData[i * 4 + 3]   // yMin
-            );
-          }
-        }
-        
-        rayTracedGl.uniform1i(rayTracedGl.getUniformLocation(program, 'u_numSegments'), segments.length);
-        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_mirrorDist'), mirrorDist);
-        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_mirrorHalfWidth'), mirrorHalfWidth);
-        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_mirrorHalfHeight'), mirrorHalfHeight);
-        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_imagePlaneDist'), imagePlaneDist);
-        rayTracedGl.uniform2f(rayTracedGl.getUniformLocation(program, 'u_imageSize'), imageSizeX, imageSizeY);
-        rayTracedGl.uniform1f(rayTracedGl.getUniformLocation(program, 'u_fov'), fov);
-        
-        // Bind webcam texture
-        rayTracedGl.activeTexture(rayTracedGl.TEXTURE0);
-        rayTracedGl.bindTexture(rayTracedGl.TEXTURE_2D, rayTracedTexture);
-        rayTracedGl.uniform1i(rayTracedGl.getUniformLocation(program, 'u_webcamTex'), 0);
-        
-        // Clear and draw
-        rayTracedGl.clearColor(0.0, 0.0, 0.0, 1.0);
-        rayTracedGl.clear(rayTracedGl.COLOR_BUFFER_BIT);
-        rayTracedGl.drawArrays(rayTracedGl.TRIANGLE_STRIP, 0, 4);
-      }
-
       // FPS counter
       frameCount++;
       const currentTime = performance.now();
@@ -412,7 +202,7 @@ export default function SimpleWebcam() {
         cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [isActive, bottomZ0, bottomZ1, bottomZ2, topZ0, topZ1, topZ2, controlY1Ratio, mirrorDist, mirrorRadius, mirrorHalfWidth, mirrorHalfHeight, imagePlaneDist, imageSizeX, imageSizeY, fov]);
+  }, [isActive]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px' }}>
@@ -437,22 +227,30 @@ export default function SimpleWebcam() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <h3>Ray-Traced Output</h3>
-          <canvas 
-            ref={rayTracedCanvasRef} 
-            width="640" 
-            height="480"
-            style={{ border: '2px solid #ccc', borderRadius: '8px' }}
+          <RayTracedMirror
+            videoRef={videoRef}
+            curveSegments={[
+              { yMin: -mirrorHalfHeight, yMax: 0, z0: bottomZ0, z1: bottomZ1, z2: bottomZ2 },
+              { yMin: 0, yMax: mirrorHalfHeight, z0: topZ0, z1: topZ1, z2: topZ2 }
+            ]}
+            mirrorDist={mirrorDist}
+            mirrorHalfWidth={mirrorHalfWidth}
+            mirrorHalfHeight={mirrorHalfHeight}
+            imagePlaneDist={imagePlaneDist}
+            imageSizeX={imageSizeX}
+            imageSizeY={imageSizeY}
+            fov={fov}
+            width={640}
+            height={480}
           />
         </div>
       </div>
       
       <MirrorVisualization
-        bottomZ0={bottomZ0}
-        bottomZ1={bottomZ1}
-        bottomZ2={bottomZ2}
-        topZ0={topZ0}
-        topZ1={topZ1}
-        topZ2={topZ2}
+        curveSegments={[
+          { yMin: -mirrorHalfHeight, yMax: 0, z0: bottomZ0, z1: bottomZ1, z2: bottomZ2 },
+          { yMin: 0, yMax: mirrorHalfHeight, z0: topZ0, z1: topZ1, z2: topZ2 }
+        ]}
         mirrorDist={mirrorDist}
         mirrorHalfHeight={mirrorHalfHeight}
         imagePlaneDist={imagePlaneDist}
@@ -601,21 +399,6 @@ export default function SimpleWebcam() {
           </summary>
           
           <div style={{ marginTop: '15px', paddingLeft: '20px' }}>
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px' }}>
-                Middle Point Y Position: {controlY1Ratio.toFixed(2)} (−1=bottom, 0=center, +1=top)
-              </label>
-              <input 
-                type="range" 
-                min="-1.0" 
-                max="1.0" 
-                step="0.05" 
-                value={controlY1Ratio}
-                onChange={(e) => setControlY1Ratio(parseFloat(e.target.value))}
-                style={{ width: '100%' }}
-              />
-            </div>
-
             <div style={{ marginBottom: '15px' }}>
               <label style={{ display: 'block', marginBottom: '5px' }}>
                 Mirror Distance: {mirrorDist.toFixed(2)}
