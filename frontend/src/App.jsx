@@ -1,8 +1,17 @@
-import { useState } from "react";
+import React, { useState } from 'react';
+import Mirror from "./MirrorCurveDesigner";
 import './App.css';
+import FunhouseMirrorWebcam from './FunhouseMirrorWebcam';
 
 export default function App() {
   const [isDay, setIsDay] = useState(false);
+  const [mirrorCurve, setMirrorCurve] = useState(null);
+  const [isDone, setIsDone] = useState(false);
+
+  const handleCurveChange = (curveData) => {
+    console.log('App received curve data:', curveData);
+    setMirrorCurve(curveData);
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden text-white">
@@ -55,13 +64,22 @@ export default function App() {
         {/* Stars (only night) */}
         {!isDay &&
           [...Array(25)].map((_, i) => {
-            const cx = Math.random() * 1200;
-            const cyBase = 50 + Math.random() * 250;
-            const amplitude = 1 + Math.random();
-            const duration = 2 + Math.random() * 3;
-            const delay = Math.random() * 2;
+            // Use seeded values to prevent stars from jumping on re-render
+            const seed = 98765 + i * 500;
+            const random = (offset) => {
+              const x = Math.sin((seed + offset) * 12.9898) * 43758.5453;
+              return x - Math.floor(x);
+            };
+            
+            const cx = random(0) * 1200;
+            const cyBase = 50 + random(1) * 250;
+            const amplitude = 1 + random(2);
+            const duration = 2 + random(3) * 3;
+            const delay = random(4) * 2;
+            const radius = 1 + random(5);
+            
             return (
-              <circle key={i} cx={cx} cy={cyBase} r={1 + Math.random()} fill="white">
+              <circle key={i} cx={cx} cy={cyBase} r={radius} fill="white">
                 <animate
                   attributeName="cy"
                   values={`${cyBase - amplitude};${cyBase + amplitude};${cyBase - amplitude}`}
@@ -83,9 +101,15 @@ export default function App() {
         {/* Clouds (only day) */}
         {isDay &&
           [...Array(6)].map((_, i) => {
+            const seed = 13579 + i * 300;
+            const random = (offset) => {
+              const x = Math.sin((seed + offset) * 12.9898) * 43758.5453;
+              return x - Math.floor(x);
+            };
+            
             const y = 100 + i * 60;
-            const scale = 0.5 + Math.random() * 0.5;
-            const numEllipses = 3 + Math.floor(Math.random() * 3);
+            const scale = 0.5 + random(0) * 0.5;
+            const numEllipses = 3 + Math.floor(random(1) * 3);
             const duration = 40 + i * 10;
             const xStart = -300 - i * 200;
 
@@ -101,11 +125,18 @@ export default function App() {
                   begin="0s"
                 />
                 {[...Array(numEllipses)].map((_, j) => {
-                  const offsetX = -20 + Math.random() * 40;
-                  const offsetY = -10 + Math.random() * 20;
-                  const rx = 20 + Math.random() * 20;
-                  const ry = 10 + Math.random() * 15;
-                  const opacity = 0.6 + Math.random() * 0.2;
+                  const ellipseSeed = seed + j * 100;
+                  const ellipseRandom = (offset) => {
+                    const x = Math.sin((ellipseSeed + offset) * 12.9898) * 43758.5453;
+                    return x - Math.floor(x);
+                  };
+                  
+                  const offsetX = -20 + ellipseRandom(0) * 40;
+                  const offsetY = -10 + ellipseRandom(1) * 20;
+                  const rx = 20 + ellipseRandom(2) * 20;
+                  const ry = 10 + ellipseRandom(3) * 15;
+                  const opacity = 0.6 + ellipseRandom(4) * 0.2;
+                  
                   return (
                     <ellipse
                       key={j}
@@ -195,13 +226,148 @@ export default function App() {
             />
           </circle>
         ))}
+
+        {/* Floating Balloons */}
+        {[...Array(8)].map((_, i) => {
+          // Use seeded values instead of Math.random() to prevent re-calculation on re-render
+          const seed = 54321 + i * 1000;
+          const random = (offset) => {
+            const x = Math.sin((seed + offset) * 12.9898) * 43758.5453;
+            return x - Math.floor(x);
+          };
+          
+          const cx = 150 + i * 130 + random(0) * 50;
+          const duration = 8 + random(1) * 4;
+          const delay = i * 1.5;
+          const wobbleAmount = 15 + random(2) * 10;
+          const wobbleDuration = 2 + random(3) * 2;
+          const wobbleDelay = random(4) * 2;
+          const colors = ['#ef4444', '#f97316', '#fbbf24', '#a855f7', '#ec4899', '#06b6d4'];
+          const color = colors[i % colors.length];
+          
+          return (
+            <g key={i}>
+              {/* Balloon string */}
+              <line 
+                x1={cx} 
+                y1="900" 
+                x2={cx} 
+                y2="930" 
+                stroke="#64748b" 
+                strokeWidth="1.5"
+              >
+                <animate
+                  attributeName="y1"
+                  from="900"
+                  to="-150"
+                  dur={`${duration}s`}
+                  begin={`${delay}s`}
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="y2"
+                  from="930"
+                  to="-120"
+                  dur={`${duration}s`}
+                  begin={`${delay}s`}
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="x1"
+                  values={`${cx};${cx + wobbleAmount};${cx - wobbleAmount};${cx}`}
+                  dur={`${wobbleDuration}s`}
+                  begin={`${wobbleDelay}s`}
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="x2"
+                  values={`${cx};${cx + wobbleAmount};${cx - wobbleAmount};${cx}`}
+                  dur={`${wobbleDuration}s`}
+                  begin={`${wobbleDelay}s`}
+                  repeatCount="indefinite"
+                />
+              </line>
+              
+              {/* Balloon */}
+              <ellipse 
+                cx={cx} 
+                cy="900" 
+                rx="20" 
+                ry="25" 
+                fill={color}
+                opacity="0.9"
+              >
+                <animate
+                  attributeName="cy"
+                  from="900"
+                  to="-150"
+                  dur={`${duration}s`}
+                  begin={`${delay}s`}
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="cx"
+                  values={`${cx};${cx + wobbleAmount};${cx - wobbleAmount};${cx}`}
+                  dur={`${wobbleDuration}s`}
+                  begin={`${wobbleDelay}s`}
+                  repeatCount="indefinite"
+                />
+              </ellipse>
+              
+              {/* Balloon highlight */}
+              <ellipse 
+                cx={cx - 6} 
+                cy="895" 
+                rx="6" 
+                ry="8" 
+                fill="rgba(255, 255, 255, 0.5)"
+              >
+                <animate
+                  attributeName="cy"
+                  from="895"
+                  to="-155"
+                  dur={`${duration}s`}
+                  begin={`${delay}s`}
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="cx"
+                  values={`${cx - 6};${cx + wobbleAmount - 6};${cx - wobbleAmount - 6};${cx - 6}`}
+                  dur={`${wobbleDuration}s`}
+                  begin={`${wobbleDelay}s`}
+                  repeatCount="indefinite"
+                />
+              </ellipse>
+            </g>
+          );
+        })}
       </svg>
 
       {/* Floating Camera Box */}
       <div className="relative z-10 flex items-center justify-center min-h-screen">
-        <div className="w-[600px] aspect-video bg-white rounded-3xl shadow-2xl border-8 border-red-500 rotate-[-2deg]">
-          <div className="w-full h-full bg-black rounded-2xl flex items-center justify-center text-white">
-            CAMERA FEED
+        <div className="w-[600px] aspect-video bg-white rounded-3xl shadow-2xl border-8 border-red-500">
+          <div className="w-full h-full bg-black rounded-2xl flex items-center justify-center text-white relative">
+            {!isDone ? (
+              <>
+                <Mirror onCurveChange={handleCurveChange}/>
+                <button
+                  onClick={() => setIsDone(true)}
+                  className="absolute bottom-4 right-4 bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg font-bold shadow-lg z-30"
+                >
+                  Done
+                </button>
+              </>
+            ) : (
+              <>
+                <FunhouseMirrorWebcam curveData={mirrorCurve} />
+                <button
+                  onClick={() => setIsDone(false)}
+                  className="absolute bottom-4 right-4 bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow-lg z-30"
+                >
+                  Back to Designer
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
